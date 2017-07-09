@@ -341,8 +341,8 @@ struct ParticleMatcher
 	int M;						// Maximum # of subdivisions
 	int sliceIdx;				// current slice index
 	int maxStackCount;			// max # of slices that can contribute to a particle
-	int cellCount;				// The total number of grid cells
-	int cellSize;
+	int cellSize;				// The # of pixels per cell (1D)
+	int cellDim;				// The # of cells per image (1D)
 	float neighborRadius;		// radius around which we search for matches
 	int * cellLowerBound;		// Pointer to lower bound of prev particle range (sorted by index)
 	int * cellUpperBound;		// pointer to upper bound of prev particle range (sorted by index)
@@ -352,13 +352,13 @@ struct ParticleMatcher
 		M( m ),
 		sliceIdx( s ),
 		maxStackCount( mSC ),
-		cellCount( cC ),
 		neighborRadius( nR ),
 		cellLowerBound( cLB ),
 		cellUpperBound( cUB ),
 		prevParticles( pP )
 	{
-		cellSize = N / cellCount;			// Cell resolution
+		cellSize = N >> M;       // # of pixels per cell dim
+		cellDim = N / cellSize;  // # of cells per image dim
 	}
 
 	// Returns null if no match is found
@@ -372,8 +372,8 @@ struct ParticleMatcher
 
 		// See if we need to search neighbors
 		int neighborIdx = 1;					// Index in cellIndices
-		int cellX = cellIndices[0] % cellCount; // X position of center cell
-		int cellY = cellIndices[0] / cellCount; // Y position of center cell
+		int cellX = cellIndices[0] % cellDim; // X position of center cell
+		int cellY = cellIndices[0] / cellDim; // Y position of center cell
 
 		// If we aren't on the left edge of the image
 		if ( cellX != 0 )
@@ -385,7 +385,7 @@ struct ParticleMatcher
 		}
 
 		// Similar for other directions
-		if ( cellX != cellCount - 1 )
+		if ( cellX != cellDim - 1 )
 		{
 			float rightGridBorder = ( cellX + 1 ) * cellSize;
 			if ( (int) newParticle.x + float( neighborRadius ) > rightGridBorder )
@@ -394,18 +394,20 @@ struct ParticleMatcher
 
 		// "Bottom" is actually the top, when you think about it... right?
 		// Make sure you haven't messed that up, please
+		// The neigbor cell we're looking for is the center offset by the
+		// cell size, which is the 1d size of a cell in pixels
 		if ( cellY != 0 )
 		{
 			float bottomGridBorder = cellY * cellSize;
 			if ( newParticle.y - neighborRadius < bottomGridBorder )
-				cellIndices[neighborIdx++] = cellIndices[0] - cellSize;
+				cellIndices[neighborIdx++] = cellIndices[0] - cellDim;
 		}
 
-		if ( cellY != cellCount - 1 )
+		if ( cellY != cellDim - 1 )
 		{
 			float top = ( cellY + 1 ) * cellSize;
 			if ( newParticle.y + neighborRadius > top )
-				cellIndices[neighborIdx++] = cellIndices[0] + cellSize;
+				cellIndices[neighborIdx++] = cellIndices[0] + cellDim;
 		}
 
 		// Why arent you checking the diagonal corners? You hack. 
@@ -695,8 +697,10 @@ void ParticleFinder::Solver::impl::createGridCells( int N )
 	// If our grid cell vectors are empty, create them now
 	if ( m_dGridCellLowerBoundVec.empty() || m_dGridCellUpperBoundVec.empty() )
 	{
-		const int cellSize = N >> m_uMaxLevel;
-		const int cellCount = N / cellSize;
+		const int cellSize = N >> m_uMaxLevel; // 1D size of cell in pixels
+		const int cellCount = N / cellSize;    // 1D count of cells
+
+		// Create 2D cell sub-image
 		const int nTotalCells = cellCount * cellCount;
 		m_dGridCellLowerBoundVec.resize( nTotalCells );
 		m_dGridCellUpperBoundVec.resize( nTotalCells );
