@@ -69,24 +69,29 @@ ParticleFinder::ParticleFinder() :
 	m_fParticleThreshold( 0.005f )
 {}
 
-std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute( std::list<std::string> liStackPaths, int nStartOfStack, int nEndOfStack, bool bGetUserInput /*= false*/ )
+ParticleFinder::~ParticleFinder() 
 {
-	// Construct filters now
-	// make sure that we have valid params)
-	if ( m_nDilationRadius == 0 || m_nGaussFiltRadius == 0 )
-		return {};
+	cancelTask();
+}
 
+int ParticleFinder::GetNumImages() const 
+{
+	return (int)m_vdInputImages.size();
+}
+
+bool ParticleFinder::Initialize(std::list<std::string> liStackPaths, int nStartOfStack, int nEndOfStack, bool bDoUserInput /*= false*/)
+{
 	// For each tiff stack
-	int nSlices( 0 );
+	int nSlices(0);
 	std::cout << "Starting to load slices..." << std::endl;
 
 	// Load the images - this could be done
 	// concurrently to the CenterFind DSP
-	for ( const std::string& strStackPath : liStackPaths )
+	for (const std::string& strStackPath : liStackPaths)
 	{
 		// Attempt to open multibitmap
-		FIMULTIBITMAP * FI_Input = FreeImage_OpenMultiBitmap( FIF_TIFF, strStackPath.c_str(), 0, 1, 1, TIFF_DEFAULT );
-		if ( FI_Input == nullptr )
+		FIMULTIBITMAP * FI_Input = FreeImage_OpenMultiBitmap(FIF_TIFF, strStackPath.c_str(), 0, 1, 1, TIFF_DEFAULT);
+		if (FI_Input == nullptr)
 		{
 			std::cout << "Error loading stack " << strStackPath << std::endl;
 			continue;
@@ -95,47 +100,47 @@ std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute( std::list<st
 
 		// Read in images, create data
 
-		int nImages = FreeImage_GetPageCount( FI_Input );
-		nImages = std::min( nEndOfStack, FreeImage_GetPageCount( FI_Input ) );
-		for ( int ixSlice = std::max( nStartOfStack, 0 ); ixSlice < nImages; ixSlice++ )
+		int nImages = FreeImage_GetPageCount(FI_Input);
+		nImages = std::min(nEndOfStack, FreeImage_GetPageCount(FI_Input));
+		for (int ixSlice = std::max(nStartOfStack, 0); ixSlice < nImages; ixSlice++)
 		{
-			if ( FIBITMAP * image = FreeImage_LockPage( FI_Input, ixSlice - 1 ) )
+			if (FIBITMAP * image = FreeImage_LockPage(FI_Input, ixSlice - 1))
 			{
 				// Create 24-bit RGB image, initialize to zero (this could be a member)
-				int nWidth = FreeImage_GetWidth( image );
-				int nHeight = FreeImage_GetHeight( image );
-				cv::Size imgSize( nWidth, nHeight );
-				cv::Mat m = cv::Mat::zeros( imgSize, CV_8UC3 );
+				int nWidth = FreeImage_GetWidth(image);
+				int nHeight = FreeImage_GetHeight(image);
+				cv::Size imgSize(nWidth, nHeight);
+				cv::Mat m = cv::Mat::zeros(imgSize, CV_8UC3);
 
 				// If we haven't yet created our internal mats,
 				// do so now (and assume all will be of same dimension...)
-				if ( m_vdInputImages.empty() )
+				if (m_vdInputImages.empty())
 				{
 					// Initialize all other mats to zero on device (may be superfluous)
-					m_dFilteredImg = GpuMat( imgSize, CV_32F, 0.f );
-					m_dDilatedImg = GpuMat( imgSize, CV_32F, 0.f );
-					m_dTmpImg = GpuMat( imgSize, CV_32F, 0.f );
-					m_dLocalMaxImg = GpuMat( imgSize, CV_32F, 0.f );
-					m_dTmpImg = GpuMat( imgSize, CV_32F, 0.f );
+					m_dFilteredImg = GpuMat(imgSize, CV_32F, 0.f);
+					m_dDilatedImg = GpuMat(imgSize, CV_32F, 0.f);
+					m_dTmpImg = GpuMat(imgSize, CV_32F, 0.f);
+					m_dLocalMaxImg = GpuMat(imgSize, CV_32F, 0.f);
+					m_dTmpImg = GpuMat(imgSize, CV_32F, 0.f);
 
 					// It's in our best interest to ensure these are continuous
-					cv::cuda::createContinuous( imgSize, CV_32F, m_dThreshImg );
-					cv::cuda::createContinuous( imgSize, CV_8U, m_dParticleImg );
-					m_dThreshImg.setTo( 0 );
-					m_dParticleImg.setTo( 0 );
+					cv::cuda::createContinuous(imgSize, CV_32F, m_dThreshImg);
+					cv::cuda::createContinuous(imgSize, CV_8U, m_dParticleImg);
+					m_dThreshImg.setTo(0);
+					m_dParticleImg.setTo(0);
 				}
 
 				// Convert FIBITMAP to 24 bit RGB, store inside cv::Mat's buffer
-				FreeImage_ConvertToRawBits( m.data, image, m.step, 24, 0xFF, 0xFF, 0xFF, true );
+				FreeImage_ConvertToRawBits(m.data, image, m.step, 24, 0xFF, 0xFF, 0xFF, true);
 
 				// Upload to device (should this get a separate buffer?)
 				GpuMat d_InputImg;
-				d_InputImg.upload( m );
+				d_InputImg.upload(m);
 
 				// Convert to greyscale float, store in our input buffer
-				cv::cuda::cvtColor( d_InputImg, m_dTmpImg, CV_RGB2GRAY );
-				m_dTmpImg.convertTo( d_InputImg, CV_32F, 1. / 0xFF );
-				m_vdInputImages.push_back( d_InputImg );
+				cv::cuda::cvtColor(d_InputImg, m_dTmpImg, CV_RGB2GRAY);
+				m_dTmpImg.convertTo(d_InputImg, CV_32F, 1. / 0xFF);
+				m_vdInputImages.push_back(d_InputImg);
 
 				// Inc slice count
 				nSlices++;
@@ -146,25 +151,134 @@ std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute( std::list<st
 			}
 
 			// Print something out every 10 slices
-			if ( ixSlice % 10 == 0 )
+			if (ixSlice % 10 == 0)
 				std::cout << "On image " << ixSlice << " of stack " << strStackPath << "..." << std::endl;
 		}
 
 		// Close multibitmap
-		FreeImage_CloseMultiBitmap( FI_Input );
+		FreeImage_CloseMultiBitmap(FI_Input);
 	}
 
-	/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	if (!m_vdInputImages.empty()) 
+	{
+		m_Solver.Reset();
+		return true;
+	}
 
-	if ( bGetUserInput )
-		getUserInput( m_vdInputImages.front() );
+	return false;
+}
 
-	int nSlicesProcessed( 0 );
-	for ( GpuMat d_Input : m_vdInputImages )
-		doDSPAndFindParticlesInImg( nSlicesProcessed++, d_Input );
+void ParticleFinder::cancelTask() 
+{
+	if (m_spParticleFindingTask)
+	{
+		{
+			LockMutex(m_spParticleFindingTask->muData);
+			m_spParticleFindingTask->bCancel = true;
+		}
 
-	// Return all found particles
-	return m_Solver.GetFoundParticles();
+		// Wait till it's done
+		while (true)
+		{
+			LockMutex(m_spParticleFindingTask->muData);
+			if (m_spParticleFindingTask->bIsDone)
+				break;
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+
+		m_spParticleFindingTask = nullptr;
+	}
+}
+
+std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute(std::shared_ptr<AsyncParticleFindingTask> spParticleFindingTask /*= nullptr*/)
+{
+	// Construct filters now
+	// make sure that we have valid params)
+	if (m_vdInputImages.empty() || m_nDilationRadius == 0 || m_nGaussFiltRadius == 0)
+		return{};
+
+	// If we have a task going, cancel it now
+	if (m_spParticleFindingTask)
+	{
+		cancelTask();
+	}
+
+	// If an async task was passed in, we return empty
+	// and kick the task off with the supplied params
+	if (spParticleFindingTask)
+	{
+		// Launch thread
+		m_spParticleFindingTask = spParticleFindingTask;
+		std::thread([this, spParticleFindingTask]()
+		{
+			// Set DSP params
+			SetGaussianRadius(m_spParticleFindingTask->nGaussianRadius);
+			SetFWHM(m_spParticleFindingTask->fHWHM);
+			SetDilationRadius(m_spParticleFindingTask->nDilationRadius);
+			SetParticleThreshold(m_spParticleFindingTask->fParticleThreshold);
+			GetSolver()->SetMaskRadius(m_spParticleFindingTask->nMaskRadius);
+			GetSolver()->SetFeatureRadius(m_spParticleFindingTask->nFeatureRadius);
+			GetSolver()->SetMinSliceCount(m_spParticleFindingTask->nMinSliceCount);
+			GetSolver()->SetMaxSliceCount(m_spParticleFindingTask->nMaxSliceCount);
+			GetSolver()->SetNeighborRadius(m_spParticleFindingTask->nNeighborRadius);
+			GetSolver()->SetMaxLevel(m_spParticleFindingTask->nMaxLevel);
+			GetSolver()->Init();
+			
+			// Make sure this is empty
+			m_spParticleFindingTask->mapFoundSliceToParticles.clear();
+
+			size_t i;
+			for (i = 0; i < m_vdInputImages.size(); i++)
+			{
+				{	// Check to see if we're cancelled
+					// TODO clear solver's found particles
+					LockMutex(m_spParticleFindingTask->muData);
+					if (m_spParticleFindingTask->bCancel)
+					{
+						m_spParticleFindingTask->bIsDone = true;
+						return;
+					}
+				}
+
+				// Find particles in image
+				doDSPAndFindParticlesInImg((int)i, m_vdInputImages[i], true);
+
+				// Update task with found particles (we have to look at an earlier slice,
+				// as the particle center won't be in the slice we just processed)
+				if (i >= m_spParticleFindingTask->nMaxSliceCount)
+				{
+					int ixFindParticles = (int)(i - m_spParticleFindingTask->nMaxSliceCount);
+					{
+						LockMutex(m_spParticleFindingTask->muData);
+						m_spParticleFindingTask->nLastImageProcessed = ixFindParticles;
+						m_spParticleFindingTask->mapFoundSliceToParticles[ixFindParticles] = m_Solver.GetFoundParticlesInSlice(i);
+					}
+				}
+			}
+
+			{	// Verdun
+				std::lock_guard<std::mutex> lg(m_spParticleFindingTask->muData);
+				m_spParticleFindingTask->bIsDone = true;
+			}
+
+			return;
+		}).detach();
+
+		return{};
+	}
+	else
+	{
+		GetSolver()->Init();
+
+		// Otherwise we do the DSP with our current params and return found particles
+		for (size_t i = 0; i < m_vdInputImages.size(); i++)
+		{
+			doDSPAndFindParticlesInImg((int)i, m_vdInputImages[i], true);
+		}
+
+		// Return all found particles
+		return m_Solver.GetFoundParticles();
+	}
 }
 
 void ParticleFinder::getUserInput( GpuMat d_Input )
@@ -206,16 +320,17 @@ void ParticleFinder::getUserInput( GpuMat d_Input )
 			GpuMat d_InputCirc = d_Input.clone();
 
 			// do DSP, get particles
-			std::vector<FoundParticle> vParticelsInImg = doDSPAndFindParticlesInImg( 0, d_Input, true );
+			std::vector<FoundParticle> vParticlesInImg;
+			doDSPAndFindParticlesInImg( 0, d_Input, false, &vParticlesInImg, true );
 
 			// Draw circles in local max image
-			if ( !vParticelsInImg.empty() )
+			if ( !vParticlesInImg.empty() )
 			{
 				cv::Mat hImg;
 				d_InputCirc.download( hImg );
 				// This offset was needed for some reason
 				int dX( -3 ), dY( -3 );
-				for ( FoundParticle& fp : vParticelsInImg )
+				for ( FoundParticle& fp : vParticlesInImg)
 				{
 					cv::circle( hImg, cv::Point( fp.fPosX + dX, fp.fPosY + dY ), 5, cv::Scalar( 0 ), -1 );
 				}
@@ -289,10 +404,12 @@ void ParticleFinder::getUserInput( GpuMat d_Input )
 	}
 }
 
-std::vector<ParticleFinder::FoundParticle> ParticleFinder::doDSPAndFindParticlesInImg( int ixSlice, GpuMat d_Input, bool bResetKernels /*= false*/ )
+int ParticleFinder::doDSPAndFindParticlesInImg(int ixSlice, GpuMat d_Input, bool bLinkParticles /*= true*/, std::vector<FoundParticle> * pFoundParticles /*= nullptr*/, bool bResetKernels /*= false*/)
 {
 	if ( bResetKernels || m_dCircleFilter.empty() || m_dDilationKernel.empty() )
 	{	
+		std::cout << "Constructing DSP kernels" << std::endl;
+
 		// Create circle image
 		int nBPDiameter = 2 * m_nGaussFiltRadius + 1;
 		cv::Mat h_Circle = cv::Mat::zeros( cv::Size( nBPDiameter, nBPDiameter ), CV_32F );
@@ -312,6 +429,8 @@ std::vector<ParticleFinder::FoundParticle> ParticleFinder::doDSPAndFindParticles
 		// Create dilation kernel from host kernel (only single byte supported? why nVidia why)
 		m_dDilationKernel = cv::cuda::createMorphologyFilter( cv::MORPH_DILATE, CV_32F, h_Dilation );
 	}
+
+	std::cout << "Finding and linking particles in slice " << ixSlice << std::endl;
 
 	double dGaussianScale = 1 / ( 3 * pow( m_nGaussFiltRadius, 2 ) );
 
@@ -362,9 +481,7 @@ std::vector<ParticleFinder::FoundParticle> ParticleFinder::doDSPAndFindParticles
 	// Cast to uchar, store as particle image (values are still 0 or 1, so no scale needed)
 	m_dLocalMaxImg.convertTo( m_dParticleImg, CV_8U );
 
-	std::vector<ParticleFinder::FoundParticle> vParticlesInImg;
-	m_Solver.FindParticlesInImage( ixSlice, d_Input, m_dFilteredImg, m_dThreshImg, m_dParticleImg, &vParticlesInImg );
-	return vParticlesInImg;
+	return m_Solver.FindParticlesInImage( ixSlice, d_Input, m_dFilteredImg, m_dThreshImg, m_dParticleImg, bLinkParticles, pFoundParticles );
 }
 
 void ParticleFinder::SetGaussianRadius( int nGaussianRadius )

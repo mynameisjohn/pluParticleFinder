@@ -2,7 +2,11 @@
 
 #include <memory>
 #include <list>
+#include <future>
 #include <opencv2/opencv.hpp>
+
+#define LockMutex(_mu) std::lock_guard<std::mutex> _muLG(_mu)
+#define LockMutexWithCode(_mu, _code) std::lock_guard<std::mutex> _muLG(_mu); {_code;}
 
 // Particle Finder class
 // Does all DSP, delegates
@@ -28,7 +32,16 @@ class ParticleFinder
 	//	3) determines particle "centers" (located at slice with max intensity)
 	//	4) discards invalid particles
 	// Implemented in .cu/cuh files because it runs some thrust/CUDA code
-	struct FoundParticle;
+public:
+	struct FoundParticle
+	{
+		float fPosX;
+		float fPosY;
+		float fPosZ;
+		float fIntensity;
+	};
+
+private:
 	class Solver
 	{
 		struct impl;
@@ -41,11 +54,15 @@ class ParticleFinder
 		~Solver();
 
 		// Find particles in a given image, return the count of particles found
-		int FindParticlesInImage( int nSliceIdx, GpuMat d_Input, GpuMat d_FilteredImage, GpuMat d_ThreshImg, GpuMat d_ParticleImg,
-								  std::vector<FoundParticle> * pParticlesInImg = nullptr );
+		int FindParticlesInImage(int nSliceIdx, GpuMat d_Input, GpuMat d_FilteredImage, GpuMat d_ThreshImg, GpuMat d_ParticleImg,
+			bool bLinkParticles = true, std::vector<FoundParticle> * pParticlesInImg = nullptr );
 
 		// Get all found particles
 		std::vector<FoundParticle> GetFoundParticles() const;
+
+		std::vector<FoundParticle> GetFoundParticlesInSlice(int ixSlice) const;
+
+		void Init();
 
 		// Reset current count of found particles
 		void Reset();
@@ -78,16 +95,19 @@ class ParticleFinder
 	cv::Ptr<cv::cuda::Filter> m_dCircleFilter;		// Circle Filter
 	cv::Ptr<cv::cuda::Filter> m_dDilationKernel;	// Dilation Filter
 
+	std::future<void> m_fuParticleFindingTask;
+	
 	// This actual detects particles in the input image
 	// the result is a contiguous black and white
 	// image that can be used in particle detection
-	std::vector<FoundParticle> doDSPAndFindParticlesInImg( int ixSlice, GpuMat d_Input, bool bResetKernels = false );
+	int doDSPAndFindParticlesInImg( int ixSlice, GpuMat d_Input, bool bLinkParticles = true, std::vector<FoundParticle> * pFoundParticles = nullptr, bool bResetKernels = false );
 
 	void getUserInput( GpuMat d_Input );
 	
 public:
 	// Initializes DSP params to default testbed params
 	ParticleFinder();
+	~ParticleFinder();
 
 	// Simple getter for solver to make it accessible
 	Solver * GetSolver() { return &m_Solver; }
@@ -106,16 +126,34 @@ public:
 	// code on whatever TIFF stacks have been loaded
 	// using whatever DSP params have been set
 	// Returns the # of particles found acrosds all stacks
-	struct FoundParticle
-	{
-		float fPosX;
-		float fPosY;
-		float fPosZ;
-		float fIntensity;
-	};
 
-	// Execute the particle finding algorithm on a set of TIFF images
-	std::vector<FoundParticle> Execute( std::list<std::string> liStackPaths, int nStartOfStack, int nEndOfStack, bool bDoUserInput = false );
+
+	bool Initialize(std::list<std::string> liStackPaths, int nStartOfStack, int nEndOfStack, bool bDoUserInput = false);
+
+	int GetNumImages() const;
+
+	struct AsyncParticleFindingTask {
+		std::mutex muData;
+		bool bCancel;
+		bool bIsDone;
+		ParticleFinder * pParticleFinder;
+		int nLastImageProcessed;
+		int nGaussianRadius;
+		float fHWHM;
+		int nDilationRadius;
+		float fParticleThreshold;
+		int nMaskRadius;
+		int nFeatureRadius;
+		int nMinSliceCount;
+		int nMaxSliceCount;
+		int nNeighborRadius;
+		int nMaxLevel;
+		std::map<int, std::vector<FoundParticle>> mapFoundSliceToParticles;
+	};
+	std::vector<FoundParticle> Execute(std::shared_ptr<AsyncParticleFindingTask> upParticleFindingTask = nullptr);
+	std::shared_ptr<AsyncParticleFindingTask> m_spParticleFindingTask;
+	std::atomic_bool bPauseTask;
+	void cancelTask();
 };
 
 // Helper functions
