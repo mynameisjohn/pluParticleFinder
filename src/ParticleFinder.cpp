@@ -227,14 +227,14 @@ std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute(std::shared_p
 			// Make sure this is empty
 			m_spParticleFindingTask->mapFoundSliceToParticles.clear();
 
-			size_t i;
-			for (i = 0; i < m_vdInputImages.size(); i++)
+			for ( size_t i = 0; i < m_vdInputImages.size(); i++)
 			{
 				{	// Check to see if we're cancelled
 					// TODO clear solver's found particles
 					LockMutex(m_spParticleFindingTask->muData);
 					if (m_spParticleFindingTask->bCancel)
 					{
+						GetSolver()->Reset();
 						m_spParticleFindingTask->bIsDone = true;
 						return;
 					}
@@ -251,7 +251,7 @@ std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute(std::shared_p
 					{
 						LockMutex(m_spParticleFindingTask->muData);
 						m_spParticleFindingTask->nLastImageProcessed = ixFindParticles;
-						m_spParticleFindingTask->mapFoundSliceToParticles[ixFindParticles] = m_Solver.GetFoundParticlesInSlice(i);
+						m_spParticleFindingTask->mapFoundSliceToParticles[ixFindParticles] = m_Solver.GetFoundParticlesInSlice( ixFindParticles );
 					}
 				}
 			}
@@ -262,7 +262,8 @@ std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute(std::shared_p
 			}
 
 			return;
-		}).detach();
+		}
+		).detach();
 
 		return{};
 	}

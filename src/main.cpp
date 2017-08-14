@@ -84,7 +84,6 @@ extern "C"
 			if (it->second->mapFoundSliceToParticles.count(ixSlice))
 			{
 				pvFoundParticles = &it->second->mapFoundSliceToParticles[ixSlice];
-				pvFoundParticles->at(0) = { 1,1,1,1 };
 			}
 		}
 
