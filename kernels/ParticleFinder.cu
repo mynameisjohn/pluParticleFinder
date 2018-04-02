@@ -5,6 +5,8 @@
 #include <thrust/remove.h>
 #include <thrust/sort.h>
 #include <thrust/binary_search.h>
+#include <thrust/iterator/discard_iterator.h>
+#include <thrust/count.h>
 
 #define SOLVER_DEVICE TRUE
 

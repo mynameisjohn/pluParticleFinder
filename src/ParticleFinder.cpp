@@ -168,6 +168,7 @@ bool ParticleFinder::Initialize(std::list<std::string> liStackPaths, int nStartO
 	return false;
 }
 
+// Blocking call to cancel particle finding task
 void ParticleFinder::cancelTask() 
 {
 	if (m_spParticleFindingTask)
@@ -177,19 +178,13 @@ void ParticleFinder::cancelTask()
 			m_spParticleFindingTask->bCancel = true;
 		}
 
-		// Wait till it's done
-		while (true)
-		{
-			LockMutex(m_spParticleFindingTask->muData);
-			if (m_spParticleFindingTask->bIsDone)
-				break;
-			std::this_thread::sleep_for(std::chrono::milliseconds(1));
-		}
-
+		// Wait till it's done and clear shared pointer
+		m_fuParticleFindingTask.get();
 		m_spParticleFindingTask = nullptr;
 	}
 }
 
+// Returns empty if being launched asynchronously
 std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute(std::shared_ptr<AsyncParticleFindingTask> spParticleFindingTask /*= nullptr*/)
 {
 	// Construct filters now
@@ -208,8 +203,9 @@ std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute(std::shared_p
 	if (spParticleFindingTask)
 	{
 		// Launch thread
+		LockMutex( spParticleFindingTask->muData );
 		m_spParticleFindingTask = spParticleFindingTask;
-		std::thread([this, spParticleFindingTask]()
+		m_fuParticleFindingTask = std::async(std::launch::async, [this, spParticleFindingTask]()
 		{
 			// Set DSP params
 			SetGaussianRadius(m_spParticleFindingTask->nGaussianRadius);
@@ -230,10 +226,10 @@ std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute(std::shared_p
 			for ( size_t i = 0; i < m_vdInputImages.size(); i++)
 			{
 				{	// Check to see if we're cancelled
-					// TODO clear solver's found particles
 					LockMutex(m_spParticleFindingTask->muData);
 					if (m_spParticleFindingTask->bCancel)
 					{
+						// Reset solver (clears found particles) and flag done
 						GetSolver()->Reset();
 						m_spParticleFindingTask->bIsDone = true;
 						return;
@@ -254,6 +250,7 @@ std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute(std::shared_p
 						m_spParticleFindingTask->mapFoundSliceToParticles[ixFindParticles] = m_Solver.GetFoundParticlesInSlice( ixFindParticles );
 					}
 				}
+
 			}
 
 			{	// Verdun
@@ -262,8 +259,7 @@ std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute(std::shared_p
 			}
 
 			return;
-		}
-		).detach();
+		} );
 
 		return{};
 	}

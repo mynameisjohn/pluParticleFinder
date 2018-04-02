@@ -9,11 +9,13 @@ SET(CMAKE_CXX_FLAGS "-std=c++11")
 IF(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
   # debug define
   ADD_DEFINITIONS(-DDEBUG=1)
+  SET(OCV_SUFFX "341d")
   # Add -g for unix
   IF(UNIX)
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
   ENDIF(UNIX)
 ELSE(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
+  SET(OCV_SUFFX "341")
   # Add unix optimization flag
   IF(UNIX)
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -O2")
@@ -31,11 +33,11 @@ SET(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS};-arch sm_50")
 
 IF(WIN32)
   # OCV 3.1
-  SET(OCV_INC_DIR $ENV{LIBDIR}/OpenCV/31/include)
-  SET(OCV_LIB_DIR $ENV{LIBDIR}/OpenCV/31/lib/x64)
+  SET(OCV_INC_DIR $ENV{LIBDIR}/opencv/include)
+  SET(OCV_LIB_DIR $ENV{LIBDIR}/opencv/lib/x64)
 
   # FreeImage (header is next to library)
-  SET(FREEIMG_INC_DIR $ENV{LIBDIR}/FreeImage/lib/x64)
+  SET(FREEIMG_INC_DIR $ENV{LIBDIR}/FreeImage/x64)
   SET(FREEIMG_LIB_DIR ${FREEIMG_INC_DIR})
   SET(FREEIMG_LIB FreeImage.lib)
 ELSE(WIN32)
@@ -69,19 +71,19 @@ SOURCE_GROUP("Source" FILES ${SOURCES})
 SOURCE_GROUP("Include" FILES ${HEADERS})
 
 # Add the pylGrooveMatrix executable, which depends on source, include, and scripts
-ADD_EXECUTABLE(pluParticleFinder ${SOURCES} ${HEADERS} ${KERNELS})
+CUDA_ADD_EXECUTABLE(pluParticleFinder ${SOURCES} ${HEADERS} ${KERNELS})
 
 # Link libraries with executable
 TARGET_LINK_LIBRARIES(pluParticleFinder LINK_PUBLIC
-  opencv_core
-  opencv_imgproc
-  opencv_imgcodecs
-  opencv_highgui
-  opencv_cudaimgproc
-  opencv_cudaarithm
-  opencv_cudafilters
-  opencv_highgui
-  opencv_core
-  opencv_imgproc
+  opencv_core${OCV_SUFFX}
+  opencv_imgproc${OCV_SUFFX}
+  opencv_imgcodecs${OCV_SUFFX}
+  opencv_highgui${OCV_SUFFX}
+  opencv_cudaimgproc${OCV_SUFFX}
+  opencv_cudaarithm${OCV_SUFFX}
+  opencv_cudafilters${OCV_SUFFX}
+  opencv_highgui${OCV_SUFFX}
+  opencv_core${OCV_SUFFX}
+  opencv_imgproc${OCV_SUFFX}
   ${FREEIMG_LIB}
   ${CUDA_LIBRARIES})

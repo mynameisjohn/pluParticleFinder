@@ -38,6 +38,9 @@ public class PLuTARC_Engine : MonoBehaviour {
     [DllImport(strPluginName)]
     private static extern bool GetParticlesInSlice(System.IntPtr pParticleFinder, int ixSlice, ref System.IntPtr rpData, ref int rnParticles);
 
+    [DllImport(strPluginName)]
+    private static extern bool CancelParticleFindingTask(System.IntPtr pParticleFinder);
+
     // Public variables
     public string[] ImageFiles = new string[0];
     public int StartOfStack = 0;
@@ -56,6 +59,8 @@ public class PLuTARC_Engine : MonoBehaviour {
     public int MaxLevel = 3;
 
     public float ParticleScale = 1f;
+
+    public bool Verbose = false;
 
     // Private variables
     System.IntPtr m_pParticleFinder = System.IntPtr.Zero;
@@ -89,7 +94,17 @@ public class PLuTARC_Engine : MonoBehaviour {
     void OnGUI()
     {
         // Flag dirty state, which kicks off particle finding
-        if (GUI.Button(new Rect(10, 10, 100, 30), "Start"))
+        if (m_coroFindParticles != null && m_bCoroRunning)
+        {
+            if (GUI.Button(new Rect(10, 10, 100, 30), "Stop"))
+            {
+                CancelParticleFindingTask(m_pParticleFinder);
+                StopCoroutine(m_coroFindParticles);
+                m_coroFindParticles = null;
+                m_bCoroRunning = false;
+            }
+        }
+        else if (GUI.Button(new Rect(10, 10, 100, 30), "Start"))
         {
             SetDirty();
         }
@@ -110,6 +125,17 @@ public class PLuTARC_Engine : MonoBehaviour {
         m_aSlices = null;
     }
 
+    void DestroyExistingSlices()
+    {
+        for (int ixSlice = 0; ixSlice < m_aSlices.Length; ixSlice++)
+        {
+            if (m_aSlices[ixSlice])
+            {
+                Destroy(m_aSlices[ixSlice]);
+                m_aSlices[ixSlice] = null;
+            }
+        }
+    }
 	
 	// Update is called once per frame
 	void Update ()
@@ -148,12 +174,18 @@ public class PLuTARC_Engine : MonoBehaviour {
     // in the slice, we create and merge particle geometry
     IEnumerator CoroGetSlice()
     {
+        float tStart = Time.time;
+
         m_bCoroRunning = true;
+
+        // Destroy existing slices
+        DestroyExistingSlices();
 
         // Create particle geometry for each slice
         for (int ixSlice = 0; ixSlice < m_aSlices.Length; ixSlice++)
         {
-            Debug.Log("Getting slice " + ixSlice.ToString());
+            if (Verbose)
+                Debug.Log("Finding particles in slice slice " + ixSlice);
             
             // Keep spinning until we get a valid slice count,
             // yield after each iteration to avoid stalling
@@ -161,20 +193,17 @@ public class PLuTARC_Engine : MonoBehaviour {
             System.IntPtr pParticleData = System.IntPtr.Zero;
             while (GetParticlesInSlice(m_pParticleFinder, ixSlice, ref pParticleData, ref nParticlesInSlice) == false)
             {
+                if (Verbose)
+                    Debug.Log("Waiting for particles in slice " + ixSlice);
                 yield return true;
-            }
-
-            // We have new particle data for this slice - destroy any existing slice data now
-            if (m_aSlices[ixSlice] != null)
-            {
-                Destroy(m_aSlices[ixSlice]);
-                m_aSlices[ixSlice] = null;
-                //yield return true;
             }
 
             // We have a particle count for this slice
             if (nParticlesInSlice > 0)
             {
+                if (Verbose)
+                    Debug.Log("Found " + nParticlesInSlice + " particles in slice " + ixSlice);
+
                 // Use the float data to construct a vector of particle data
                 // The x and y components are the xy position, and the third component
                 // is the particle intensity (actual z pos is implied by slice index)
@@ -276,6 +305,11 @@ public class PLuTARC_Engine : MonoBehaviour {
 
             yield return true;
         }
+
+        float tEnd = Time.time;
+
+        //if (Verbose)
+        Debug.Log("Particle finding took " + (tEnd - tStart) + " seconds");
 
         // Get out
         m_bCoroRunning = false;

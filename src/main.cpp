@@ -8,6 +8,12 @@
 #define DLL_EXPORT
 #endif
 
+// TODO:
+// 1. Make unity use a separate thread instead of a coroutine
+// 2. Use a future instead of detaching a thread
+// 3. Make the async task have a destructor that cancels
+// 4. Add a loading bar / sliders for the UI
+
 // Mockup of various C# interfaces
 
 // We call this once in start to load the image files into
@@ -49,19 +55,8 @@ extern "C"
 			spParticleFindingTask->nNeighborRadius = nNeighborRadius;
 			spParticleFindingTask->nMaxLevel = nMaxLevel;
 
-			// Cancel any existing task
-			auto it = s_mapParticleFindingTasks.find(pParticleFinder);
-			if (it != s_mapParticleFindingTasks.end())
-			{
-				if (it->second)
-				{
-					LockMutex(it->second->muData);
-					it->second->bCancel = true;
-				}
-				s_mapParticleFindingTasks.erase(it);
-			}
-
-			// Kick off our task, it can be cancelled above later
+			// Kick off our task new task, which will cancel old,
+			// and store in map / replace any existing task
 			pParticleFinder->Execute(spParticleFindingTask);
 			s_mapParticleFindingTasks[pParticleFinder] = spParticleFindingTask;
 
@@ -77,17 +72,20 @@ extern "C"
 		// See if task is done
 		std::vector<ParticleFinder::FoundParticle> * pvFoundParticles = nullptr;
 		auto it = s_mapParticleFindingTasks.find(pParticleFinder);
+		bool bDone = false;
 		if (it != s_mapParticleFindingTasks.end())
 		{
 			// A vector is added to the task's map once its been processed
+			// if we can't find it it means the task isn't done
 			LockMutex(it->second->muData);
+			bDone = it->second->bIsDone;
 			if (it->second->mapFoundSliceToParticles.count(ixSlice))
 			{
 				pvFoundParticles = &it->second->mapFoundSliceToParticles[ixSlice];
 			}
 		}
 
-		// If we had a vector, assign the pointer to its data
+		// If we had a vector, assign the pointer to its data and return true
 		if (pvFoundParticles)
 		{
 			if (pnParticles)
@@ -97,18 +95,27 @@ extern "C"
 
 			return true;
 		}
+		else if (bDone)
+		{
+			if ( *pnParticles )
+				*pnParticles = 0;
+			if ( ppData )
+				*ppData = nullptr;
 
-		// We haven't found particles in it yet
+			return true;
+		}
+
+		// We haven't yet found particles in this slice
 		return false;
 	}
 
-	DLL_EXPORT ParticleFinder * CreateParticleFinder(const char ** aszImageFiles, int nImageFiles, int nStartOfStack, int nEndOfStack, int * pnSliceCount)
+	DLL_EXPORT ParticleFinder * CreateParticleFinder( const char ** aszImageFiles, int nImageFiles, int nStartOfStack, int nEndOfStack, int * pnSliceCount )
 	{
-		if (ParticleFinder * pParticleFinder = new ParticleFinder())
+		if ( ParticleFinder * pParticleFinder = new ParticleFinder() )
 		{
-			if (pParticleFinder->Initialize(std::list<std::string>(aszImageFiles, aszImageFiles + nImageFiles), nStartOfStack, nEndOfStack))
+			if ( pParticleFinder->Initialize( std::list<std::string>( aszImageFiles, aszImageFiles + nImageFiles ), nStartOfStack, nEndOfStack ) )
 			{
-				if (pnSliceCount)
+				if ( pnSliceCount )
 					*pnSliceCount = pParticleFinder->GetNumImages();
 				return pParticleFinder;
 			}
@@ -116,27 +123,33 @@ extern "C"
 		}
 
 		return nullptr;
-}
+	}
+
+	DLL_EXPORT bool CancelParticleFindingTask( ParticleFinder * pParticleFinder )
+	{
+		// Cancel any existing task
+		auto it = s_mapParticleFindingTasks.find( pParticleFinder );
+		if ( it != s_mapParticleFindingTasks.end() )
+		{
+			if ( it->second )
+			{
+				LockMutex( it->second->muData );
+				it->second->bCancel = true;
+			}
+			s_mapParticleFindingTasks.erase( it );
+			return true;
+		}
+		return false;
+	}
 
 	DLL_EXPORT bool DestroyParticleFinder(ParticleFinder * pParticleFinder)
 	{
-		// Cancel any existing task
-		auto it = s_mapParticleFindingTasks.find(pParticleFinder);
-		if (it != s_mapParticleFindingTasks.end())
-		{
-			if (it->second)
-			{
-				LockMutex(it->second->muData);
-				it->second->bCancel = true;
-			}
-			s_mapParticleFindingTasks.erase(it);
-		}
+		CancelParticleFindingTask( pParticleFinder );
 
 		if (pParticleFinder)
 			delete pParticleFinder;
 		return (bool)pParticleFinder;
 	}
-
 }
 
 #ifndef PLU_DLL

@@ -94,8 +94,6 @@ private:
 	cv::Ptr<cv::cuda::Filter> m_dGaussFilter;		// Gaussian Filter
 	cv::Ptr<cv::cuda::Filter> m_dCircleFilter;		// Circle Filter
 	cv::Ptr<cv::cuda::Filter> m_dDilationKernel;	// Dilation Filter
-
-	std::future<void> m_fuParticleFindingTask;
 	
 	// This actual detects particles in the input image
 	// the result is a contiguous black and white
@@ -152,7 +150,7 @@ public:
 	};
 	std::vector<FoundParticle> Execute(std::shared_ptr<AsyncParticleFindingTask> upParticleFindingTask = nullptr);
 	std::shared_ptr<AsyncParticleFindingTask> m_spParticleFindingTask;
-	std::atomic_bool bPauseTask;
+	std::future<void> m_fuParticleFindingTask;
 	void cancelTask();
 };
 
