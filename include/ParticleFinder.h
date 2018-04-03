@@ -129,6 +129,7 @@ public:
 	bool Initialize(std::list<std::string> liStackPaths, int nStartOfStack, int nEndOfStack, bool bDoUserInput = false);
 
 	int GetNumImages() const;
+	bool GetImageDimensions( int * pnX, int * pnY ) const;
 
 	struct AsyncParticleFindingTask {
 		std::mutex muData;

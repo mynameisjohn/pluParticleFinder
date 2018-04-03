@@ -79,6 +79,17 @@ int ParticleFinder::GetNumImages() const
 	return (int)m_vdInputImages.size();
 }
 
+bool ParticleFinder::GetImageDimensions( int * pnX, int * pnY ) const
+{
+	if ( m_vdInputImages.empty() )
+		return false;
+	if ( pnX )
+		*pnX = m_vdInputImages.front().size().width;
+	if ( pnY )
+		*pnY = m_vdInputImages.front().size().height;
+	return true;
+}
+
 bool ParticleFinder::Initialize(std::list<std::string> liStackPaths, int nStartOfStack, int nEndOfStack, bool bDoUserInput /*= false*/)
 {
 	// For each tiff stack

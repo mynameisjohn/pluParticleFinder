@@ -109,7 +109,7 @@ extern "C"
 		return false;
 	}
 
-	DLL_EXPORT ParticleFinder * CreateParticleFinder( const char ** aszImageFiles, int nImageFiles, int nStartOfStack, int nEndOfStack, int * pnSliceCount )
+	DLL_EXPORT ParticleFinder * CreateParticleFinder( const char ** aszImageFiles, int nImageFiles, int nStartOfStack, int nEndOfStack, int * pnSliceCount, int * pnPixelsX, int * pnPixelsY )
 	{
 		if ( ParticleFinder * pParticleFinder = new ParticleFinder() )
 		{
@@ -117,6 +117,7 @@ extern "C"
 			{
 				if ( pnSliceCount )
 					*pnSliceCount = pParticleFinder->GetNumImages();
+				pParticleFinder->GetImageDimensions( pnPixelsX, pnPixelsY );
 				return pParticleFinder;
 			}
 			delete pParticleFinder;
