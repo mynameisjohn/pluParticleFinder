@@ -149,7 +149,7 @@ bool ParticleFinder::Initialize(std::list<std::string> liStackPaths, int nStartO
 				d_InputImg.upload(m);
 
 				// Convert to greyscale float, store in our input buffer
-				cv::cuda::cvtColor(d_InputImg, m_dTmpImg, CV_RGB2GRAY);
+				cv::cuda::cvtColor(d_InputImg, m_dTmpImg, cv::COLOR_RGB2GRAY);
 				m_dTmpImg.convertTo(d_InputImg, CV_32F, 1. / 0xFF);
 				m_vdInputImages.push_back(d_InputImg);
 
