@@ -8,7 +8,9 @@
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/count.h>
 
-#define SOLVER_DEVICE 1
+#ifndef SOLVER_DEVICE 
+    #define SOLVER_DEVICE 1
+#endif
 
 // Grid cell, used as a 2-D spatial data 
 // structure to help searching for particle matches
