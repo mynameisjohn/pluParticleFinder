@@ -98,6 +98,7 @@ bool ParticleFinder::Initialize(std::list<std::string> liStackPaths, int nStartO
 
     // Load the images - this could be done
     // concurrently to the CenterFind DSP
+    int ixStack (0);
     for (const std::string& strStackPath : liStackPaths)
     {
         // Attempt to open multibitmap
@@ -152,9 +153,8 @@ bool ParticleFinder::Initialize(std::list<std::string> liStackPaths, int nStartO
                 cv::cuda::cvtColor(d_InputImg, m_dTmpImg, cv::COLOR_RGB2GRAY);
                 m_dTmpImg.convertTo(d_InputImg, CV_32F, 1. / 0xFF);
                 m_vdInputImages.push_back(d_InputImg);
-
+                m_mapImageToStackFrame[nSlices++] = std::make_pair (ixStack + 1, ixSlice);
                 // Inc slice count
-                nSlices++;
             }
             else
             {
@@ -168,6 +168,7 @@ bool ParticleFinder::Initialize(std::list<std::string> liStackPaths, int nStartO
 
         // Close multibitmap
         FreeImage_CloseMultiBitmap(FI_Input);
+        ixStack++;
     }
 
     if (!m_vdInputImages.empty()) 

@@ -18,6 +18,7 @@ class ParticleFinder
     // Useful typedef
     using GpuMat = cv::cuda::GpuMat;
     std::vector<GpuMat> m_vdInputImages;    // Buffer used for input
+    std::map<int, std::pair<int, int>> m_mapImageToStackFrame; // used to map input images to stacks / frams
 
     ///////////////////////////////////////////////////////////////////
     // DSP parameters
