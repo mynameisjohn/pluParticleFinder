@@ -37,7 +37,7 @@ SET(CUDA_ARCH "sm_50" CACHE STRING "CUDA Streaming Architecture version")
 # Set up sm arch (may want to change this)
 SET(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS};-arch ${CUDA_ARCH}")
 
-SET(OCV_VERSION "310" CACHE STRING "OpenCV Version")
+SET(OCV_VERSION "412" CACHE STRING "OpenCV Version")
 
 IF (CMAKE_BUILD_TYPE MATCHES Debug)
   SET(OCV_SUFFIX "${OCV_VERSION}d")
