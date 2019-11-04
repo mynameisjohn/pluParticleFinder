@@ -38,6 +38,7 @@ struct Particle
     float y;                        // Y pos
     float z;                        // Z pos
     float i;                        // Intensity
+    float r2;                       // Intensity
     float peakIntensity;            // Peak intensity (center)
     int ixCenterSlice;                // Slice index of peak intensity (center)
     int ixLastSlice;                // Index of last contributing slice
@@ -45,11 +46,12 @@ struct Particle
     State pState;                    // Current intensity state
 
     __host__ __device__
-        Particle( float x = -1.f, float y = -1.f, float i = -1.f, int idx = -1 ) :
+        Particle( float x = -1.f, float y = -1.f, float i = -1.f, int idx = -1, float r2_val = -1.f ) :
         x( x ),
         y( y ),
         z( (float) idx ),
         i( i ),
+        r2 (r2_val),
         peakIntensity( i ),
         ixCenterSlice( 0 ),
         ixLastSlice( idx ),
@@ -150,10 +152,11 @@ struct Particle2FoundParticle
     ParticleFinder::FoundParticle operator()( const Particle& p )
     {
         ParticleFinder::FoundParticle ret;
-        ret.fIntensity = 654;
-        ret.fPosZ = 12;
         ret.fPosX= p.x;
         ret.fPosY = p.y;
+        ret.fPosZ = p.z;
+        ret.fIntensity = p.peakIntensity;
+        ret.fR2 = p.r2;
         return ret;
     }
 };
@@ -304,10 +307,12 @@ struct MakeParticleFromIdx
         float * tmpCircPtr = circMask;
         float * tmpXPtr = rxMask;
         float * tmpYPtr = ryMask;
+        float * tmpR2Ptr = rSqMask;
 
         // To be calculated
         float total_mass( 0 );
         float x_offset( 0 ), y_offset( 0 );
+        float r2_sum (0);
 
         // Apply the mask as a multiplcation
         for ( int iY = -kernelRad; iY <= kernelRad; iY++ )
@@ -323,15 +328,20 @@ struct MakeParticleFromIdx
                 total_mass += lmImgVal * ( *tmpCircPtr++ );
                 x_offset += lmImgVal * ( *tmpXPtr++ );
                 y_offset += lmImgVal * ( *tmpYPtr++ );
+                r2_sum += lmImgVal * (*tmpR2Ptr++);
             }
         }
 
         // Calculate x val, y val
-        float x_val = float( x ) + x_offset / total_mass;
-        float y_val = float( y ) + y_offset / total_mass;
+        // (in the original code the calculation is
+        // x_val = x + x_offset/total_maxx - kernelRad - 1... not sure if I still need that)
+        float total_mass_inv = 1.f / total_mass;
+        float x_val = float( x ) + x_offset * total_mass_inv - kernelRad - 1;
+        float y_val = float( y ) + y_offset * total_mass_inv - kernelRad - 1;
+        float r2_val = r2_sum * total_mass_inv;
 
         // Construct particle and return
-        Particle p( x_val, y_val, total_mass, sliceIdx );
+        Particle p( x_val, y_val, total_mass, sliceIdx, r2_val);
         return p;
     }
 };
@@ -626,7 +636,8 @@ void ParticleFinder::Solver::impl::Init()
         }
     }
 
-    // I forget what these do...
+    // threshold / multiply by cicle kernel to zero values outside radius
+    // (maybe we could multiply h_R2 by circ as well, but the IPP code did a threshold)
     cv::threshold( h_R2, h_R2, pow( (double) m_uMaskRadius, 2 ), 1, cv::THRESH_TOZERO_INV );
     cv::multiply( h_RX, h_Circ, h_RX );
     cv::multiply( h_RY, h_Circ, h_RY );

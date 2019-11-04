@@ -40,6 +40,7 @@ public:
         float fPosY;
         float fPosZ;
         float fIntensity;
+        float fR2;
     };
 
 private:
