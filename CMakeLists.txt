@@ -25,9 +25,8 @@ ELSEIF (CMAKE_BUILD_TYPE MATCHES Release)
   SET(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS}; -O2")
 ENDIF (CMAKE_BUILD_TYPE MATCHES Debug)
 
-IF (NOT SOLVER_DEVICE)
-    ADD_DEFINITIONS(-DSOLVER_DEVICE=1)
-ENDIF (NOT SOLVER_DEVICE)
+SET(SOLVER_DEVICE 1 CACHE BOOL "Run the particle solver on the device")
+SET(CUDA_ARCH "sm_50" CACHE STRING "CUDA Streaming Architecture version")
 
 # Hard code CUDA to be on for now
 # let CMake find CUDA
