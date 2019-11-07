@@ -66,7 +66,7 @@ ParticleFinder::ParticleFinder() :
     m_nGaussFiltRadius( 6 ),
     m_nDilationRadius( 3 ),
     m_fHWHM( 4 ),
-    m_fParticleThreshold( 0.005f )
+    m_fParticleThreshold( 5 )
 {}
 
 ParticleFinder::~ParticleFinder() 
@@ -422,17 +422,17 @@ int ParticleFinder::doDSPAndFindParticlesInImg(int ixSlice, GpuMat d_Input, bool
     {    
         std::cout << "Constructing DSP kernels" << std::endl;
 
-        // Create circle image
         int nBPDiameter = 2 * m_nGaussFiltRadius + 1;
-        cv::Mat h_Circle = cv::Mat::zeros( cv::Size( nBPDiameter, nBPDiameter ), CV_32F );
-        cv::circle( h_Circle, cv::Size( m_nGaussFiltRadius, m_nGaussFiltRadius ), m_nGaussFiltRadius, 1.f, -1 );
+        const cv::Size bpFilterSize (nBPDiameter, nBPDiameter);
+
+        // Create circle image
+        cv::Mat h_Circle (bpFilterSize, CV_32F, 0.f); // cv::Mat::zeros (cv::Size (nBPDiameter, nBPDiameter), CV_32F);
+        cv::circle( h_Circle, cv::Point ( m_nGaussFiltRadius, m_nGaussFiltRadius ), m_nGaussFiltRadius, 1.f, -1 );
         m_dCircleFilter = cv::cuda::createLinearFilter( CV_32F, CV_32F, h_Circle );
 
         // Create Gaussian Filter and normalization scale
-        const cv::Size bpFilterSize( nBPDiameter, nBPDiameter );
-        const double dSigma = (double) m_fHWHM / ( ( sqrt( 2 * log( 2 ) ) ) );
+        const double dSigma = (double)(m_fHWHM / 0.8325546) / 2;// m_fHWHM / ((sqrt (2 * log (2))));
         m_dGaussFilter = cv::cuda::createGaussianFilter( CV_32F, CV_32F, bpFilterSize, dSigma );
-        double dGaussianScale = 1 / ( 3 * pow( m_nGaussFiltRadius, 2 ) );
 
         // Create dilation mask
         int nDilationDiameter = 2 * m_nDilationRadius + 1;
@@ -444,15 +444,16 @@ int ParticleFinder::doDSPAndFindParticlesInImg(int ixSlice, GpuMat d_Input, bool
 
     std::cout << "Finding and linking particles in slice " << ixSlice << std::endl;
 
-    double dGaussianScale = 1 / ( 3 * pow( m_nGaussFiltRadius, 2 ) );
-
+    RemapImage (d_Input, 0, 100);
+    
     // Apply low/high pass filters (gaussian and circle kernels, resp.)
     m_dGaussFilter->apply( d_Input, m_dFilteredImg );
     //ShowImage( m_dFilteredImg );
 
     m_dCircleFilter->apply( d_Input, m_dTmpImg );
-    m_dTmpImg.convertTo( m_dTmpImg, CV_32F, dGaussianScale );
     //ShowImage( m_dTmpImg );
+    double dBandPassScale = 1 / (3 * pow (m_nGaussFiltRadius, 2));
+    m_dTmpImg.convertTo( m_dTmpImg, CV_32F, dBandPassScale);
 
     // subtract tmp from bandpass to get filtered output
     cv::cuda::subtract( m_dFilteredImg, m_dTmpImg, m_dFilteredImg );
@@ -487,8 +488,10 @@ int ParticleFinder::doDSPAndFindParticlesInImg(int ixSlice, GpuMat d_Input, bool
     cv::cuda::exp( m_dLocalMaxImg, m_dLocalMaxImg );
 
     // Threshold exponentiated image - we are left with only local maxima as nonzero pixels
-    cv::cuda::threshold( m_dLocalMaxImg, m_dLocalMaxImg, 1 - 0.0001f, 1, cv::THRESH_BINARY );
     //ShowImage( m_dLocalMaxImg );
+    constexpr double epsilon (0.0000001);
+    cv::cuda::threshold( m_dLocalMaxImg, m_dLocalMaxImg, 1.0 - epsilon, 1, cv::THRESH_BINARY );
+    
 
     // Cast to uchar, store as particle image (values are still 0 or 1, so no scale needed)
     m_dLocalMaxImg.convertTo( m_dParticleImg, CV_8U );
