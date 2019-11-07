@@ -575,7 +575,7 @@ void RemapImage( cv::cuda::GpuMat& img, double m1, double M1 )
     double m0( 1 ), M0( 2 );
     cv::cuda::minMax( img, &m0, &M0 );
     double a = ( M1 - m1 ) / ( M0 - m0 );
-    float b = m1 - a * m0;
+    double b = m1 - a * m0;
     img.convertTo( img, img.type(), a, b );
 }
 
@@ -584,7 +584,7 @@ void RemapImage( cv::Mat& img, double m1, double M1 )
     double m0( 1 ), M0( 2 );
     cv::minMaxLoc( img, &m0, &M0 );
     double a = ( M1 - m1 ) / ( M0 - m0 );
-    float b = m1 - a * m0;
+    double b = m1 - a * m0;
     img.convertTo( img, img.type(), a, b );
 }
 
