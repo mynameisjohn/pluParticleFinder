@@ -89,6 +89,7 @@ bool ParticleFinder::Initialize(std::list<std::string> liStackPaths, int nStartO
     if (!m_vdInputImages.empty()) 
     {
         m_Solver.Reset();
+        m_Solver.Init ();
 
         if (bDoUserInput)
             getUserInput (m_vdInputImages.front ());
@@ -268,7 +269,6 @@ std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute (std::shared_
     }
     else
     {
-        GetSolver ()->Init ();
 
         {
             std::ofstream outputFile ("phi41pct_3D_6zoom_2DCenters.txt", std::ios::out);
