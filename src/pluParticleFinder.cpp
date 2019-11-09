@@ -269,36 +269,33 @@ std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute (std::shared_
     }
     else
     {
+        std::ofstream outputFile ("phi41pct_3D_6zoom_2DCenters.txt", std::ios::out);
+        outputFile.setf (std::ios::fixed);
+        outputFile.precision (1);
+        bool open = outputFile.is_open ();
 
+        CudaStopWatch sdf ("DSP");
+        // Otherwise we do the DSP with our current params and return found particles
+        for (size_t i = 0; i < m_vdInputImages.size (); i++)
         {
-            std::ofstream outputFile ("phi41pct_3D_6zoom_2DCenters.txt", std::ios::out);
-            outputFile.setf (std::ios::fixed);
-            outputFile.precision (1);
-            bool open = outputFile.is_open ();
+            int width = m_vdInputImages[0].cols;
+            std::vector<FoundParticle> particlesInImg;
+            doDSPAndFindParticlesInImg ((int)i, m_vdInputImages[i], false, &particlesInImg);
 
-            CudaStopWatch sdf ("DSP");
-            // Otherwise we do the DSP with our current params and return found particles
-            for (size_t i = 0; i < m_vdInputImages.size (); i++)
-            {
-                int width = m_vdInputImages[0].cols;
-                std::vector<FoundParticle> particlesInImg;
-                doDSPAndFindParticlesInImg ((int)i, m_vdInputImages[i], false, &particlesInImg);
-
-                std::sort (particlesInImg.begin (), particlesInImg.end (), [width](
-                    const FoundParticle& a, const FoundParticle& b)
-                    {
-                        return (a.fPosX + a.fPosY * width) < (b.fPosX + b.fPosY * width);
-                    });
-
-                for (int p = 0; p < particlesInImg.size (); p++)
+            std::sort (particlesInImg.begin (), particlesInImg.end (), [width](
+                const FoundParticle& a, const FoundParticle& b)
                 {
-                    outputFile << m_mapImageToStackFrame[i].first << '\t';
-                    outputFile << m_mapImageToStackFrame[i].second << '\t';
-                    outputFile << particlesInImg[p].fPosX << '\t';
-                    outputFile << particlesInImg[p].fPosY << '\t';
-                    outputFile << particlesInImg[p].fIntensity << '\t';
-                    outputFile << sqrt (particlesInImg[p].fR2) << std::endl;
-                }
+                    return (a.fPosX + a.fPosY * width) < (b.fPosX + b.fPosY * width);
+                });
+
+            for (int p = 0; p < particlesInImg.size (); p++)
+            {
+                outputFile << m_mapImageToStackFrame[i].first << '\t';
+                outputFile << m_mapImageToStackFrame[i].second << '\t';
+                outputFile << particlesInImg[p].fPosX << '\t';
+                outputFile << particlesInImg[p].fPosY << '\t';
+                outputFile << particlesInImg[p].fIntensity << '\t';
+                outputFile << sqrt (particlesInImg[p].fR2) << std::endl;
             }
         }
 
