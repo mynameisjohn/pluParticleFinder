@@ -89,6 +89,10 @@ bool ParticleFinder::Initialize(std::list<std::string> liStackPaths, int nStartO
     if (!m_vdInputImages.empty()) 
     {
         m_Solver.Reset();
+
+        if (bDoUserInput)
+            getUserInput (m_vdInputImages.front ());
+
         return true;
     }
 

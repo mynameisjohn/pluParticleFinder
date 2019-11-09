@@ -73,10 +73,10 @@ void ParticleFinder::getUserInput (GpuMat d_Input)
 
     // We need pointers to these ints
     std::map<std::string, int> mapParamValues = {
-        { gaussRadiusTBName, 6 },    // These are the
+        { gaussRadiusTBName, 6 },     // These are the
         { hwhmTBName, 4 },            // default values
-        { dilationRadiusTBName, 3 },// specified in the
-        { particleThreshTBName, 5 } // PLuTARC_testbed
+        { dilationRadiusTBName, 3 },  // specified in the
+        { particleThreshTBName, 5 }   // PLuTARC_testbed
     };
 
     const float trackBarResolution = 1000;
@@ -108,10 +108,9 @@ void ParticleFinder::getUserInput (GpuMat d_Input)
                 cv::Mat hImg;
                 d_InputCirc.download (hImg);
                 // This offset was needed for some reason
-                int dX (-3), dY (-3);
                 for (FoundParticle& fp : vParticlesInImg)
                 {
-                    cv::circle (hImg, cv::Point (fp.fPosX + dX, fp.fPosY + dY), 5, cv::Scalar (0), -1);
+                    cv::circle (hImg, cv::Point (fp.fPosX, fp.fPosY), 5, cv::Scalar (0), -1);
                 }
                 d_InputCirc.upload (hImg);
             }
@@ -139,7 +138,7 @@ void ParticleFinder::getUserInput (GpuMat d_Input)
             cv::Rect bottomRight ({ dataSize.width, dataSize.height }, dataSize);
 
             // Copy all images to display image in correct place
-            d_Input.copyTo (displayMat (topLeft));
+            makeDisplayImage (d_Input).copyTo (displayMat (topLeft));
             makeDisplayImage (m_dFilteredImg).copyTo (displayMat (topRight));
             makeDisplayImage (m_dDilatedImg).copyTo (displayMat (bottomLeft));
             makeDisplayImage (d_InputCirc).copyTo (displayMat (bottomRight));
