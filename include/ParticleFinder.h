@@ -14,19 +14,9 @@
 // to the Solver member
 class ParticleFinder
 {
-    ///////////////////////////////////////////////////////////////////
     // Useful typedef
     using GpuMat = cv::cuda::GpuMat;
-    std::vector<GpuMat> m_vdInputImages;    // Buffer used for input
-    std::map<int, std::pair<int, int>> m_mapImageToStackFrame; // used to map input images to stacks / frams
 
-    ///////////////////////////////////////////////////////////////////
-    // DSP parameters
-    int m_nGaussFiltRadius;        // Radius of Gaussian (low-pass) Filter
-    int m_nDilationRadius;        // Radius of dilation operation
-    float m_fHWHM;                // Half-Width at Half Maximum (describes gaussian kernel)
-    float m_fParticleThreshold;    // Threshold intensity for particles in image
-    
     // Solver class - looks at particle in successive images and
     //    1) determines particle locations in the current slices 
     //    2) uses the locations to track particles across multiple slices
@@ -84,6 +74,11 @@ private:
         void SetMaxLevel( int mL );
     } m_Solver;
 
+    ///////////////////////////////////////////////////////////////////
+
+    std::vector<GpuMat> m_vdInputImages;    // Buffer used for input
+    std::map<int, std::pair<int, int>> m_mapImageToStackFrame; // used to map input images to stacks / frams
+
     // Internal buffers - these are of the same
     // dimensions, but may be different data types
     GpuMat m_dFilteredImg;    // Post Gaussian Bandpass
@@ -96,7 +91,15 @@ private:
     cv::Ptr<cv::cuda::Filter> m_dGaussFilter;        // Gaussian Filter
     cv::Ptr<cv::cuda::Filter> m_dCircleFilter;        // Circle Filter
     cv::Ptr<cv::cuda::Filter> m_dDilationKernel;    // Dilation Filter
-    
+
+    ///////////////////////////////////////////////////////////////////
+    // DSP parameters
+    // These are the default testbed params
+    int m_nGaussFiltRadius{ 6 };         // Radius of Gaussian (low-pass) Filter
+    int m_nDilationRadius{ 3 };          // Radius of dilation operation
+    float m_fHWHM{ 4.f };                // Half-Width at Half Maximum (describes gaussian kernel)
+    float m_fParticleThreshold{ 5.f };   // Threshold intensity for particles in image
+
     // This actual detects particles in the input image
     // the result is a contiguous black and white
     // image that can be used in particle detection
@@ -106,32 +109,28 @@ private:
     
 public:
     // Initializes DSP params to default testbed params
-    ParticleFinder();
-    ~ParticleFinder();
+    ParticleFinder () = default;
+    ~ParticleFinder () { cancelTask (); }
 
     // Simple getter for solver to make it accessible
     Solver * GetSolver() { return &m_Solver; }
 
     // The other way is to use these setters
-    void SetGaussianRadius( int nGaussianRadius );
-    void SetDilationRadius( int nDilation );
-    void SetFWHM( float fHWHM );
-    void SetParticleThreshold( float fParticleThreshold );
-    int GetGaussianRadius() const;
-    int GetDilationRadius() const;
-    float GetFWHM() const;
-    float GetParticleThreshold() const;
+    inline void SetGaussianRadius (int nGaussianRadius) { m_nGaussFiltRadius = nGaussianRadius; }
+    inline void SetDilationRadius (int nDilationRadius) { m_nDilationRadius = nDilationRadius; }
+    inline void SetFWHM (int fHWHM) { m_fHWHM = fHWHM; }
+    inline void SetParticleThreshold (int fParticleThreshold) { m_fParticleThreshold = fParticleThreshold; }
 
-    // Runs the DSP and particle solving / linking
-    // code on whatever TIFF stacks have been loaded
-    // using whatever DSP params have been set
-    // Returns the # of particles found acrosds all stacks
+    inline int GetGaussianRadius () const { return m_nGaussFiltRadius; }
+    inline int GetDilationRadius () const { return m_nGaussFiltRadius; }
+    inline float GetFWHM () const { return m_fHWHM; }
+    inline float GetParticleThreshold () const { return m_fParticleThreshold; }
 
 
     bool Initialize(std::list<std::string> liStackPaths, int nStartOfStack, int nEndOfStack, bool bDoUserInput = false);
 
-    int GetNumImages() const;
-    bool GetImageDimensions( int * pnX, int * pnY ) const;
+    size_t GetNumImages () const { return m_vdInputImages.size (); }
+    cv::Size GetImageDimensions () { return m_vdInputImages.empty () ? cv::Size() : m_vdInputImages.front ().size (); }
 
     struct AsyncParticleFindingTask {
         std::mutex muData;
@@ -154,6 +153,7 @@ public:
     std::vector<FoundParticle> Execute(std::shared_ptr<AsyncParticleFindingTask> upParticleFindingTask = nullptr);
     std::shared_ptr<AsyncParticleFindingTask> m_spParticleFindingTask;
     std::future<void> m_fuParticleFindingTask;
+    std::vector<FoundParticle>  launchTask (std::shared_ptr<AsyncParticleFindingTask> spParticleFindingTask);
     void cancelTask();
 };
 
