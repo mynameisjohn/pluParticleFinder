@@ -79,20 +79,23 @@ LINK_DIRECTORIES(${OCV_LIB_DIR} ${FREEIMG_LIB_DIR})
 INCLUDE_DIRECTORIES(
     ${CMAKE_CURRENT_SOURCE_DIR}/Include
     ${OCV_INC_DIR}
-    ${FREEIMG_INC_DIR})
+    ${FREEIMG_INC_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/pugixml/src)
 
 # Source files, include files, scripts
 file(GLOB SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 file(GLOB HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/include/*)
 file(GLOB KERNELS ${CMAKE_CURRENT_SOURCE_DIR}/kernels/*.cu)
+file(GLOB PUGIXML_FILES ${CMAKE_CURRENT_SOURCE_DIR}/pugixml/src/*)
 
 # Create source groups
 SOURCE_GROUP("Kernels" FILES ${KERNELS})
 SOURCE_GROUP("Source" FILES ${SOURCES})
 SOURCE_GROUP("Include" FILES ${HEADERS})
+SOURCE_GROUP("pugixml" FILES ${PUGIXML_FILES})
 
 # Add the pylGrooveMatrix executable, which depends on source, include, and scripts
-CUDA_ADD_EXECUTABLE(pluParticleFinder ${SOURCES} ${HEADERS} ${KERNELS})
+CUDA_ADD_EXECUTABLE(pluParticleFinder ${SOURCES} ${HEADERS} ${KERNELS} ${PUGIXML_FILES})
 
 # Link libraries with executable
 TARGET_LINK_LIBRARIES(pluParticleFinder LINK_PUBLIC
