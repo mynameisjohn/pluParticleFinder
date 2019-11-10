@@ -274,7 +274,6 @@ std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute (std::shared_
         outputFile.precision (1);
         bool open = outputFile.is_open ();
 
-        CudaStopWatch sdf ("DSP");
         // Otherwise we do the DSP with our current params and return found particles
         for (size_t i = 0; i < m_vdInputImages.size (); i++)
         {
