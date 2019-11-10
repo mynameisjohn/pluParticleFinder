@@ -1,0 +1,18 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<pluParams>
+
+  <input stack_start="1" stack_end="141">
+    <file>phi41pct_3D_6zoom_0001.tif</file>
+    <file>phi41pct_3D_6zoom_0002.tif</file>
+    <file>phi41pct_3D_6zoom_0003.tif</file>
+  </input>
+
+  <centerfind_params
+    filter_radius="6"
+    dilation_radius="3"
+    HWHM="4"
+    particle_threshold="5"
+    feature_radius="6"
+    mask_radius="3"/>
+
+</pluParams>
