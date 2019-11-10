@@ -1,5 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<pluParams>
+<pluParams
+    outputfile_2D="phi41pct_3D_6zoom_2DCenters.txt"
+    link_particles="false">
 
   <input stack_start="1" stack_end="141">
     <file>phi41pct_3D_6zoom_0001.tif</file>

@@ -179,7 +179,7 @@ int ParticleFinder::doDSPAndFindParticlesInImg(int ixSlice, GpuMat d_Input, bool
         m_dCircleFilter = cv::cuda::createLinearFilter( CV_32F, CV_32F, h_Circle );
 
         // Create Gaussian Filter and normalization scale
-        const double dSigma = (double)(m_fHWHM / 0.8325546) / 2;// m_fHWHM / ((sqrt (2 * log (2))));
+        const double dSigma = (double)(m_fHWHM / 0.8325546) / 2;
         m_dGaussFilter = cv::cuda::createGaussianFilter( CV_32F, CV_32F, bpFilterSize, dSigma );
 
         // Create dilation mask
@@ -240,7 +240,6 @@ int ParticleFinder::doDSPAndFindParticlesInImg(int ixSlice, GpuMat d_Input, bool
     constexpr double epsilon (0.0000001);
     cv::cuda::threshold( m_dLocalMaxImg, m_dLocalMaxImg, 1.0 - epsilon, 1, cv::THRESH_BINARY );
     
-
     // Cast to uchar, store as particle image (values are still 0 or 1, so no scale needed)
     m_dLocalMaxImg.convertTo( m_dParticleImg, CV_8U );
 
@@ -248,7 +247,7 @@ int ParticleFinder::doDSPAndFindParticlesInImg(int ixSlice, GpuMat d_Input, bool
 }
 
 // Returns empty if being launched asynchronously
-std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute (std::shared_ptr<AsyncParticleFindingTask> spParticleFindingTask /*= nullptr*/)
+std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute (bool linkParticles, std::shared_ptr<AsyncParticleFindingTask> spParticleFindingTask /*= nullptr*/)
 {
     // Construct filters now
     // make sure that we have valid params)
@@ -269,32 +268,39 @@ std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute (std::shared_
     }
     else
     {
-        std::ofstream outputFile ("phi41pct_3D_6zoom_2DCenters.txt", std::ios::out);
-        outputFile.setf (std::ios::fixed);
-        outputFile.precision (1);
-        bool open = outputFile.is_open ();
+        std::vector<FoundParticle> particlesInImg, * pParticlesInImg{ nullptr };
+        std::ofstream outputFile;
+        if (!m_strOutputFile2D.empty())
+        {
+            outputFile.open (m_strOutputFile2D, std::ios::out);
+            outputFile.setf (std::ios::fixed);
+            outputFile.precision (1);
+            pParticlesInImg = &particlesInImg;
+        }
 
         // Otherwise we do the DSP with our current params and return found particles
         for (size_t i = 0; i < m_vdInputImages.size (); i++)
         {
             int width = m_vdInputImages[0].cols;
-            std::vector<FoundParticle> particlesInImg;
-            doDSPAndFindParticlesInImg ((int)i, m_vdInputImages[i], false, &particlesInImg);
+            doDSPAndFindParticlesInImg ((int)i, m_vdInputImages[i], linkParticles, pParticlesInImg);
 
-            std::sort (particlesInImg.begin (), particlesInImg.end (), [width](
-                const FoundParticle& a, const FoundParticle& b)
-                {
-                    return (a.fPosX + a.fPosY * width) < (b.fPosX + b.fPosY * width);
-                });
-
-            for (int p = 0; p < particlesInImg.size (); p++)
+            if (outputFile.is_open())
             {
-                outputFile << m_mapImageToStackFrame[i].first << '\t';
-                outputFile << m_mapImageToStackFrame[i].second << '\t';
-                outputFile << particlesInImg[p].fPosX << '\t';
-                outputFile << particlesInImg[p].fPosY << '\t';
-                outputFile << particlesInImg[p].fIntensity << '\t';
-                outputFile << sqrt (particlesInImg[p].fR2) << std::endl;
+                std::sort (particlesInImg.begin (), particlesInImg.end (), [width](
+                    const FoundParticle& a, const FoundParticle& b)
+                    {
+                        return (a.fPosX + a.fPosY * width) < (b.fPosX + b.fPosY * width);
+                    });
+
+                for (int p = 0; p < particlesInImg.size (); p++)
+                {
+                    outputFile << m_mapImageToStackFrame[i].first << '\t';
+                    outputFile << m_mapImageToStackFrame[i].second << '\t';
+                    outputFile << particlesInImg[p].fPosX << '\t';
+                    outputFile << particlesInImg[p].fPosY << '\t';
+                    outputFile << particlesInImg[p].fIntensity << '\t';
+                    outputFile << sqrt (particlesInImg[p].fR2) << std::endl;
+                }
             }
         }
 

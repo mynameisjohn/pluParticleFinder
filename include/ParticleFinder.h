@@ -107,6 +107,8 @@ private:
 
     void getUserInput( GpuMat d_Input );
     
+    std::string m_strOutputFile2D;
+
 public:
     // Initializes DSP params to default testbed params
     ParticleFinder () = default;
@@ -126,6 +128,7 @@ public:
     inline float GetFWHM () const { return m_fHWHM; }
     inline float GetParticleThreshold () const { return m_fParticleThreshold; }
 
+    void Set2DOutputFile (std::string outputFile2D) { m_strOutputFile2D = outputFile2D; }
 
     bool Initialize(std::list<std::string> liStackPaths, int nStartOfStack, int nEndOfStack, bool bDoUserInput = false);
 
@@ -150,7 +153,7 @@ public:
         int nMaxLevel;
         std::map<int, std::vector<FoundParticle>> mapFoundSliceToParticles;
     };
-    std::vector<FoundParticle> Execute(std::shared_ptr<AsyncParticleFindingTask> upParticleFindingTask = nullptr);
+    std::vector<FoundParticle> Execute(bool linkParticles, std::shared_ptr<AsyncParticleFindingTask> upParticleFindingTask = nullptr);
     std::shared_ptr<AsyncParticleFindingTask> m_spParticleFindingTask;
     std::future<void> m_fuParticleFindingTask;
     std::vector<FoundParticle>  launchTask (std::shared_ptr<AsyncParticleFindingTask> spParticleFindingTask);
