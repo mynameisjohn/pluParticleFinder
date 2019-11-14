@@ -64,13 +64,13 @@ private:
         int GetFeatureRadius() const;    // The radius within the image we'd like to consier
         int GetMinSliceCount() const;    // The minimum # of slices we require to contribute to a particle
         int GetMaxSliceCount() const;    // The maximum # of slices we allow to contribute to a particle
-        int GetNeighborRadius() const;    // The radius in which we search for new particles
+        float GetNeighborRadius() const;    // The radius in which we search for new particles
         int GetMaxLevel() const;        // The subdivision level we use to spatially partition previous particles
         void SetMaskRadius( int mR );
         void SetFeatureRadius( int fR );
         void SetMinSliceCount( int nMinSC );
         void SetMaxSliceCount( int nMaxSC );
-        void SetNeighborRadius( int nR );
+        void SetNeighborRadius( float nR );
         void SetMaxLevel( int mL );
     } m_Solver;
 

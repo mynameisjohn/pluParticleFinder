@@ -106,7 +106,7 @@ struct ParticleFinder::Solver::impl
     int m_uFeatureRadius;                // The radius within the image we'd like to consier
     int m_uMinSliceCount;                // The minimum # of slices we require to contribute to a particle
     int m_uMaxSliceCount;                // The maximum # of slices we allow to contribute to a particle
-    int m_uNeighborRadius;                // The radius in which we search for new particles
+    int m_fNeighborRadius;                // The radius in which we search for new particles
     int m_uMaxLevel;                    // The subdivision level we use to spatially partition previous particles
 
     Img m_dCircleMask;                    // The circle mask, just a circle of radius m_uMaskRadius, each value is 1
@@ -601,7 +601,7 @@ ParticleFinder::Solver::impl::impl() :
     m_uFeatureRadius( 6 ),
     m_uMinSliceCount( 3 ),
     m_uMaxSliceCount( 5 ),
-    m_uNeighborRadius( 5 ),
+    m_fNeighborRadius( 5 ),
     m_uMaxLevel( 3 ),
     m_uCurPrevParticleCount( 0 )
 {}
@@ -987,9 +987,9 @@ void ParticleFinder::Solver::SetMaxSliceCount( int nMaxSC )
     m_upSolverImpl->m_uMaxSliceCount = nMaxSC;
 }
 
-void ParticleFinder::Solver::SetNeighborRadius( int nR )
+void ParticleFinder::Solver::SetNeighborRadius( float nR )
 {
-    m_upSolverImpl->m_uNeighborRadius = nR;
+    m_upSolverImpl->m_fNeighborRadius = nR;
 }
 
 void ParticleFinder::Solver::SetMaxLevel( int mL )
@@ -1017,9 +1017,9 @@ int ParticleFinder::Solver::GetMaxSliceCount() const
     return m_upSolverImpl->m_uMaxSliceCount;
 }
 
-int ParticleFinder::Solver::GetNeighborRadius() const
+float ParticleFinder::Solver::GetNeighborRadius() const
 {
-    return m_upSolverImpl->m_uNeighborRadius;
+    return m_upSolverImpl->m_fNeighborRadius;
 }
 
 int ParticleFinder::Solver::GetMaxLevel() const
