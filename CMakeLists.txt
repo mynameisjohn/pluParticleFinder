@@ -26,6 +26,8 @@ ELSEIF (CMAKE_BUILD_TYPE MATCHES Release)
 ENDIF (CMAKE_BUILD_TYPE MATCHES Debug)
 
 SET(SOLVER_DEVICE 1 CACHE BOOL "Run the particle solver on the device")
+ADD_DEFINITIONS(-DSOLVER_DEVICE=${SOLVER_DEVICE})
+
 SET(CUDA_ARCH "sm_50" CACHE STRING "CUDA Streaming Architecture version")
 
 # Hard code CUDA to be on for now
