@@ -1,5 +1,7 @@
 #include "ParticleFinder.h"
 
+#include <iostream>
+
 #include <thrust/device_vector.h>
 #include <thrust/copy.h>
 #include <thrust/remove.h>
@@ -7,57 +9,61 @@
 #include <thrust/binary_search.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/count.h>
+#include <thrust/extrema.h>
+#include <thrust/iterator/counting_iterator.h>
 
 #ifndef SOLVER_DEVICE 
-    #define SOLVER_DEVICE 1
+    #define SOLVER_DEVICE 0
 #endif
 
-// Grid cell, used as a 2-D spatial data 
-// structure to help searching for particle matches
-// The members are the first and last particle index
-// within the buffer the particles live in
-struct Cell
-{
-    int lower;
-    int upper;
-};
+#if SOLVER_DEVICE
+#define thrust_operator __device__
+#define thrust_exec thrust::device
+#else
+#define thrust_operator __host__
+#define thrust_exec thrust::host
+#endif
 
 // Our device particle struct
 struct Particle
 {
     // Intensity state, tracked across
     // multiple slices to determine where particle ends
-    enum class State
-    {
-        NO_MATCH = 0,
-        INCREASING,
-        DECREASING,
-        SEVER
-    };
-    float x;                        // X pos
-    float y;                        // Y pos
-    float z;                        // Z pos
-    float i;                        // Intensity
-    float r2;                       // Intensity
-    float peakIntensity;            // Peak intensity (center)
-    int ixCenterSlice;                // Slice index of peak intensity (center)
-    int ixLastSlice;                // Index of last contributing slice
-    int nContributingSlices;        // # of slices contributing
-    State pState;                    // Current intensity state
+    //enum class State
+    //{
+    //    NO_MATCH = 0,
+    //    INCREASING,
+    //    DECREASING,
+    //    SEVER
+    //};
+    float x {0};                        // X pos
+    float y {0};                        // Y pos
+    float z {0};                        // Z pos
+    float i {0};                        // Intensity
+    float r2 {0};                       // Radius
+    Particle* parent {nullptr};
+    Particle* match {nullptr};
+    int nContributingSlices {0};        // # of slices contributing
+    //int stackNum;
+    //float peakIntensity;            // Peak intensity (center)
+    //int ixCenterSlice;                // Slice index of peak intensity (center)
+    //int ixLastSlice;                // Index of last contributing slice
+    //State pState;                    // Current intensity state
 
-    __host__ __device__
-        Particle( float x = -1.f, float y = -1.f, float i = -1.f, int idx = -1, float r2_val = -1.f ) :
-        x( x ),
-        y( y ),
-        z( (float) idx ),
-        i( i ),
-        r2 (r2_val),
-        peakIntensity( i ),
-        ixCenterSlice( 0 ),
-        ixLastSlice( idx ),
-        nContributingSlices( 1 ),
-        pState( State::NO_MATCH )
-    {}
+    __host__ __device__ Particle () = default;
+    //    Particle (float x = -1.f, float y = -1.f, float i = -1.f, int idx = -1, float r2_val = -1.f, int sN = 0) :
+    //    stackNum (sN),
+    //    x( x ),
+    //    y( y ),
+    //    z( (float) idx ),
+    //    i( i ),
+    //    r2 (r2_val),
+    //    peakIntensity( i ),
+    //    ixCenterSlice( 0 ),
+    //    ixLastSlice( idx ),
+    //    nContributingSlices( 1 ),
+    //    pState( State::NO_MATCH )
+    //{}
 };
 
 // Helper for making thrust zip iterators
@@ -98,7 +104,8 @@ struct ParticleFinder::Solver::impl
 
     impl();
     void Init();
-    int FindParticlesInImage(int nSliceIdx, GpuMat d_Input, GpuMat d_FilteredImage, GpuMat d_ThreshImg, GpuMat d_ParticleImg, bool bLinkParticles, std::vector<FoundParticle> * pParticlesInImg);
+    int FindParticlesInImage(int stackNum, int nSliceIdx, GpuMat d_Input, GpuMat d_FilteredImage, GpuMat d_ThreshImg, GpuMat d_ParticleImg, bool bLinkParticles, std::vector<FoundParticle> * pParticlesInImg);
+    int LinkFoundParticles ();
     std::vector<FoundParticle> GetFoundParticles() const;
     std::vector<FoundParticle> GetFoundParticlesInSlice(int ixSlice) const;
 
@@ -114,8 +121,8 @@ struct ParticleFinder::Solver::impl
     Img m_dRadYKernel;                    // The y mask, used to calculate an offset to the y coordinate
     Img m_dRadSqKernel;                    // The r2 mask, used to calculate some value that I don't really understand
 
-    size_t m_uCurPrevParticleCount;        // The current tally of previous particles to search through
-    ParticleVec m_dPrevParticleVec;        // The vector of previously found particles
+    //size_t m_uCurPrevParticleCount;        // The current tally of previous particles to search through
+    std::list<ParticleVec> m_vParticles;        // The vector of previously found particles
 
     IntVec m_dGridCellLowerBoundVec;    // The lower bound vector of particles to search
     IntVec m_dGridCellUpperBoundVec;    // The upper bound vector of particles to search
@@ -125,25 +132,25 @@ struct ParticleFinder::Solver::impl
     void updateMatchedParticles( ParticleVec& d_NewParticleVec, ParticlePtrVec& d_ParticleMatchVec, int sliceIdx );
     void mergeUnmatchedParticles( ParticleVec& d_UnmatchedParticleVec, int N );
     size_t cullExistingParticles( int curSliceIdx );        // Remove found particles if they are deemed to be noise
-    ParticleVec findNewParticles( UcharVec& d_ParticleImgVec, Floatptr pThreshImg, int N, int sliceIdx );
+    ParticleVec findNewParticles(int stackNum, UcharVec& d_ParticleImgVec, Floatptr pThreshImg, int N, int sliceIdx );
     ParticlePtrVec findParticleMatches( ParticleVec& d_NewParticleVec, int N, int sliceIdx );
     ParticleVec consolidateUnmatchedParticles( ParticleVec& d_NewParticleVec, ParticlePtrVec& d_ParticleMatchVec );
 };
 
-// IsParticleInState predicate
-// Construct
-struct IsParticleInState
-{
-    Particle::State PS;
-    IsParticleInState( Particle::State ps) :
-        PS( ps )
-    {}
-    __host__ __device__
-    bool operator()( const Particle p ){
-        return p.pState == PS;
-    }
-};
-
+//// IsParticleInState predicate
+//// Construct
+//struct IsParticleInState
+//{
+//    Particle::State PS;
+//    IsParticleInState( Particle::State ps) :
+//        PS( ps )
+//    {}
+//    __host__ __device__
+//    bool operator()( const Particle p ){
+//        return p.pState == PS;
+//    }
+//};
+//
 // Converts the ParticleClass (which has device constructors)
 // to the host only FoundParticle class
 struct Particle2FoundParticle
@@ -155,19 +162,19 @@ struct Particle2FoundParticle
         ret.fPosX= p.x;
         ret.fPosY = p.y;
         ret.fPosZ = p.z;
-        ret.fIntensity = p.peakIntensity;
+        ret.fIntensity = p.i;
         ret.fR2 = p.r2;
         return ret;
     }
 };
-struct Particle2Float4
-{
-    __host__ __device__
-    float4 operator()( const Particle& p )
-    {
-        return float4{ p.x, p.y, p.z, p.i };
-    }
-};
+//struct Particle2Float4
+//{
+//    __host__ __device__
+//    float4 operator()( const Particle& p )
+//    {
+//        return float4{ p.x, p.y, p.z, p.i };
+//    }
+//};
 
 // Turn an x,y coord into a grid index given the image dimension N
 // and maximum subdivisions of that image m (N is a power of 2)
@@ -208,21 +215,21 @@ struct PixelToGridIdx : public thrust::unary_function < Particle, int >
 };
 
 // Particle removal predicate
-struct MaybeRemoveParticle
-{
-    int sliceIdx;    // Current slice index
-    int minSlices;    // The minimum # of slices we require to contribute to a particle
-    MaybeRemoveParticle( int s, int m ) : 
-        sliceIdx( s ), minSlices( m ) 
-    {}
-
-    __host__ __device__
-        bool operator()( const Particle p )
-    {
-        // If the particle is 2 (should be var) slices away from us, and it isn't in a sever state or is but has too few particles, return true
-        return ( sliceIdx - p.ixLastSlice > 2 && ( p.pState != Particle::State::SEVER || p.nContributingSlices < minSlices ) );
-    }
-};
+//struct MaybeRemoveParticle
+//{
+//    int sliceIdx;    // Current slice index
+//    int minSlices;    // The minimum # of slices we require to contribute to a particle
+//    MaybeRemoveParticle( int s, int m ) : 
+//        sliceIdx( s ), minSlices( m ) 
+//    {}
+//
+//    __host__ __device__
+//        bool operator()( const Particle p )
+//    {
+//        // If the particle is 2 (should be var) slices away from us, and it isn't in a sever state or is but has too few particles, return true
+//        return ( sliceIdx - p.ixLastSlice > 2 && ( p.pState != Particle::State::SEVER || p.nContributingSlices < minSlices ) );
+//    }
+//};
 
 // Particle detection predicate
 struct IsParticleAtIdx
@@ -276,6 +283,7 @@ struct CheckIfMatchIsNotNull
 // Turn an index at which we've detected a particle (above) into a real particle
 struct MakeParticleFromIdx
 {
+    int stackNum;
     int sliceIdx;        // Current slice index
     int kernelRad;        // Kernel (mask) radius
     int N;                // Image dimension
@@ -284,7 +292,8 @@ struct MakeParticleFromIdx
     float * rxMask;        // pointer to x offset mask
     float * ryMask;        // pointer to y offset mask
     float * rSqMask;    // pointer to r2 mask 
-    MakeParticleFromIdx( int sIdx, int n, int kRad, float * lm, float * cK, float * xK, float * yK, float * sqK ) :
+    MakeParticleFromIdx( int nStack, int sIdx, int n, int kRad, float * lm, float * cK, float * xK, float * yK, float * sqK ) :
+        stackNum (nStack),
         sliceIdx( sIdx ),
         N( n ),
         kernelRad( kRad ),
@@ -338,10 +347,11 @@ struct MakeParticleFromIdx
         float total_mass_inv = 1.f / total_mass;
         float x_val = float( x ) + x_offset * total_mass_inv - kernelRad - 1;
         float y_val = float( y ) + y_offset * total_mass_inv - kernelRad - 1;
+        float z_val = float(sliceIdx);
         float r2_val = r2_sum * total_mass_inv;
 
         // Construct particle and return
-        Particle p( x_val, y_val, total_mass, sliceIdx, r2_val);
+        Particle p{ x_val, y_val, z_val, total_mass, r2_val };
         return p;
     }
 };
@@ -361,7 +371,8 @@ struct ParticleMatcher
     int * cellLowerBound;        // Pointer to lower bound of prev particle range (sorted by index)
     int * cellUpperBound;        // pointer to upper bound of prev particle range (sorted by index)
     Particle* prevParticles;    // Pointer to the vector of previous particles
-    ParticleMatcher( int n, int m, int s, int mSC, int cC, int nR, int * cLB, int * cUB, Particle * pP ) :
+    float nrSq;
+    ParticleMatcher( int n, int m, int s, int mSC, int cC, float nR, int * cLB, int * cUB, Particle * pP ) :
         N( n ),
         M( m ),
         sliceIdx( s ),
@@ -373,11 +384,13 @@ struct ParticleMatcher
     {
         cellSize = N >> M;       // # of pixels per cell dim
         cellDim = N / cellSize;  // # of cells per image dim
+
+        nrSq = nR * nR;
     }
 
     // Returns null if no match is found
     __host__ __device__
-        Particle * operator()( Particle newParticle )
+    Particle * operator()( Particle& newParticle )
     {
         // The values in this array are grid indices, and we always search the center
         // The other values will be left negative until we determine the y should be searched (below)
@@ -393,8 +406,8 @@ struct ParticleMatcher
         if ( cellX != 0 )
         {
             // And we are far enough away from the left grid border
-            int leftGridBorder = cellX * cellSize;
-            if ( (int) newParticle.x - neighborRadius < leftGridBorder )
+            float leftGridBorder = cellX * cellSize;
+            if ( newParticle.x - neighborRadius < leftGridBorder )
                 cellIndices[neighborIdx++] = cellIndices[0] - 1;
         }
 
@@ -402,7 +415,7 @@ struct ParticleMatcher
         if ( cellX != cellDim - 1 )
         {
             float rightGridBorder = ( cellX + 1 ) * cellSize;
-            if ( (int) newParticle.x + float( neighborRadius ) > rightGridBorder )
+            if ( newParticle.x + neighborRadius > rightGridBorder )
                 cellIndices[neighborIdx++] = cellIndices[0] + 1;
         }
 
@@ -428,6 +441,7 @@ struct ParticleMatcher
 
         // For every cell we've decided to search (break when index is negative)
         const Particle * pBestMatch = nullptr;
+        float bestMatchDist (0);
         for ( int c = 0; cellIndices[c] >= 0; c++ )
         {
             // See if every particle in that cell is a match
@@ -442,32 +456,37 @@ struct ParticleMatcher
                 const Particle& oldParticle = prevParticles[p];
 
                 // tooFar might not be necessary if I cull beforehand
-                bool tooFar = ( sliceIdx - oldParticle.ixLastSlice != 1 ); // Contiguity
-                bool tooMany = ( oldParticle.nContributingSlices > maxStackCount );    // Count
-                bool alreadyDone = ( oldParticle.pState == Particle::State::SEVER );    // Severed
-                if ( tooFar || tooMany || alreadyDone )
-                    continue;
+                //bool tooFar = (newParticle.stackNum != oldParticle.stackNum) || ( (sliceIdx - oldParticle.ixLastSlice) != 1 ); // Contiguity
+                //bool tooMany = ( oldParticle.nContributingSlices > maxStackCount );    // Count
+                //bool alreadyDone = ( oldParticle.pState == Particle::State::SEVER );    // Severed
+                //if ( tooFar || tooMany || alreadyDone )
+                //    continue;
 
                 // See if the particle is within our range
                 float dX = oldParticle.x - newParticle.x;
                 float dY = oldParticle.y - newParticle.y;
-                float distSq = powf( dX, 2 ) + powf( dY, 2 );
-                if ( distSq < neighborRadius * neighborRadius )
+                float distSq = powf (dX, 2) + powf (dY, 2);
+                if ( distSq < nrSq )
                 {
                     // If there already was a match, see if this one is better
-                    if ( pBestMatch )
+                    if ( pBestMatch && distSq < bestMatchDist )
                     {
-                        // Find the old distance
-                        dX = pBestMatch->x - newParticle.x;
-                        dY = pBestMatch->y - newParticle.y;
+                        //// Find the old distance
+                        //float olddX = pBestMatch->x - newParticle.x;
+                        //float olddY = pBestMatch->y - newParticle.y;
+                        //float oldDistSq = powf (olddX, 2) + powf (olddY, 2);
 
-                        // If this one is closer, assign it as the match
-                        if ( powf( dX, 2 ) + powf( dY, 2 ) > distSq )
-                            pBestMatch = &prevParticles[p];
+                        //// If this one is closer, assign it as the match
+                        //if (oldDistSq > distSq )
+                        pBestMatch = &oldParticle;
+                        bestMatchDist = distSq;
                     }
                     // No existing match, take this one
                     else
-                        pBestMatch = &prevParticles[p];
+                    {
+                        pBestMatch = &oldParticle;
+                        bestMatchDist = distSq;
+                    }
                 }
             }
         }
@@ -477,73 +496,137 @@ struct ParticleMatcher
     }
 };
 
-// This gets called on matched particles and handles intensity state logic
-// You should ensure this is thread safe beforehand, somehow (remove duplicates? not really sure)
-struct UpdateMatchedParticle
+struct DetermineIfMatched
 {
-    // Store the slice index - this should increase every time this
-    // function is called to ensure we get the full particle picture
-    int sliceIdx;
-    UpdateMatchedParticle( int s ) : sliceIdx( s ) {}
+    int minSlices;
+    int maxSlices;
 
-    // This kind of thing could be parallelized in a smarter way, probably
+    DetermineIfMatched (int m, int M)
+    : minSlices (m),
+      maxSlices (M)
+    {}
+
     template <typename tuple_t>
     __host__ __device__
-        int operator()( const tuple_t T )
+    bool operator()(const tuple_t T)
     {
-        // Function is called on a matched pair - new has been
-        // been matched with old. See what that means for old. 
-        Particle newParticle = thrust::get<0>( T );
-        Particle * oldParticle = thrust::get<1>( T );
-        switch ( oldParticle->pState )
-        {
-            // Shouldn't ever get no match, but assign the state and fall through
-            case Particle::State::NO_MATCH:
-                oldParticle->pState = Particle::State::INCREASING;
-            // If we're increasing, see if the new guy prompts a decrease,
-            // implying that we've passed through the center of the particle (in Z)
-            // Should we check to see if more than one particle has contributed?
-            case Particle::State::INCREASING:
-                if ( oldParticle->i > newParticle.i )
-                {
-                    oldParticle->pState = Particle::State::DECREASING;
-                    oldParticle->ixCenterSlice = sliceIdx;
-                }
-                // Otherwise see if we should update the peak intensity and z position
-                else if ( newParticle.i > oldParticle->peakIntensity )
-                {
-                    oldParticle->peakIntensity = newParticle.i;
-                    oldParticle->z = (float) sliceIdx;
-                }
-                break;
-            // In this case, if it's still decreasing then fall through
-            case Particle::State::DECREASING:
-                if ( oldParticle->i > newParticle.i )
-                    break;
-                // We were decreasing, and now we're increasing again - cut it off
-                oldParticle->pState = Particle::State::SEVER;
-            //  Particle is severed - null it out for the code below
-            case Particle::State::SEVER:
-                oldParticle = nullptr;
-        }
+        Particle& newParticle = thrust::get<0> (T);
+        Particle* oldParticle = thrust::get<1> (T);
 
-        // If we didn't sever and null out above
-        // could do this in yet another call, if you were so inclined
-        if ( oldParticle != nullptr )
-        {
-            // We're still getting information about this particle
-            oldParticle->nContributingSlices++;
-            oldParticle->ixLastSlice = sliceIdx;
+        // no match
+        if (oldParticle == nullptr)
+            return false;
 
-            // I don't know about the averaged position thing
-            oldParticle->x = 0.5f * ( oldParticle->x + newParticle.x );
-            oldParticle->y = 0.5f * ( oldParticle->y + newParticle.y );
-        }
+        // intensity increasing
+        int sliceCount = oldParticle->nContributingSlices + 1;
+        if (minSlices <= sliceCount)
+            if (oldParticle->i < newParticle.i)
+                return false;
 
-        // This gets passed to a discard iterator - doesn't matter what we return
+        // max slices exceeded
+        return sliceCount < maxSlices;
+    }
+};
+
+struct AssignParticleParent
+{
+    AssignParticleParent () = default;
+
+    template <typename tuple_t>
+    __host__ __device__
+    int operator()(const tuple_t T)
+    {
+        Particle& newParticle = thrust::get<0> (T);
+        Particle* oldParticle = thrust::get<1> (T);
+
+        newParticle.parent = oldParticle->parent ? oldParticle->parent : oldParticle;
+        assert (newParticle.parent->parent == nullptr);
+        newParticle.nContributingSlices = oldParticle->nContributingSlices + 1;
         return 0;
     }
 };
+
+
+// This gets called on matched particles and handles intensity state logic
+// You should ensure this is thread safe beforehand, somehow (remove duplicates? not really sure)
+//struct UpdateMatchedParticle
+//{
+//    // Store the slice index - this should increase every time this
+//    // function is called to ensure we get the full particle picture
+//    int sliceIdx;
+//    int minSlices;
+//    int maxSlices;
+//    UpdateMatchedParticle( int s ) : sliceIdx( s ) {}
+//
+//    // This kind of thing could be parallelized in a smarter way, probably
+//    template <typename tuple_t>
+//    __host__ __device__
+//        int operator()( const tuple_t T )
+//    {
+//        // Function is called on a matched pair - new has been
+//        // been matched with old. See what that means for old. 
+//        Particle newParticle = thrust::get<0>( T );
+//        Particle * oldParticle = thrust::get<1>( T );
+//
+//        if (oldParticle)
+//        {
+//            if (oldParticle->nContributingSlices > minSlices)
+//            {
+//                if (newParticle.i < oldParticle->i)
+//                    newParticle.parent = oldParticle;
+//            }
+//        }
+//
+//
+//        //switch ( oldParticle->pState )
+//        //{
+//        //    // Shouldn't ever get no match, but assign the state and fall through
+//        //    case Particle::State::NO_MATCH:
+//        //        oldParticle->pState = Particle::State::INCREASING;
+//        //    // If we're increasing, see if the new guy prompts a decrease,
+//        //    // implying that we've passed through the center of the particle (in Z)
+//        //    // Should we check to see if more than one particle has contributed?
+//        //    case Particle::State::INCREASING:
+//        //        if ( oldParticle->i > newParticle.i )
+//        //        {
+//        //            oldParticle->pState = Particle::State::DECREASING;
+//        //            oldParticle->ixCenterSlice = sliceIdx;
+//        //        }
+//        //        // Otherwise see if we should update the peak intensity and z position
+//        //        else if ( newParticle.i > oldParticle->peakIntensity )
+//        //        {
+//        //            oldParticle->peakIntensity = newParticle.i;
+//        //            oldParticle->z = (float) sliceIdx;
+//        //        }
+//        //        break;
+//        //    // In this case, if it's still decreasing then fall through
+//        //    case Particle::State::DECREASING:
+//        //        if ( oldParticle->i > newParticle.i )
+//        //            break;
+//        //        // We were decreasing, and now we're increasing again - cut it off
+//        //        oldParticle->pState = Particle::State::SEVER;
+//        //    //  Particle is severed - null it out for the code below
+//        //    case Particle::State::SEVER:
+//        //        oldParticle = nullptr;
+//        //}
+//
+//        //// If we didn't sever and null out above
+//        //// could do this in yet another call, if you were so inclined
+//        //if ( oldParticle != nullptr )
+//        //{
+//        //    // We're still getting information about this particle
+//        //    oldParticle->nContributingSlices++;
+//        //    oldParticle->ixLastSlice = sliceIdx;
+//
+//        //    // I don't know about the averaged position thing
+//        //    oldParticle->x = 0.5f * ( oldParticle->x + newParticle.x );
+//        //    oldParticle->y = 0.5f * ( oldParticle->y + newParticle.y );
+//        //}
+//
+//        // This gets passed to a discard iterator - doesn't matter what we return
+//        return 0;
+//    }
+//};
 
 // Used to sort particles by their grid index
 // This could be phased out if I could get sort to work with a transform iterator
@@ -555,7 +638,7 @@ struct ParticleOrderingComp
     __host__ __device__
         bool operator()( const Particle a, const Particle b )
     {
-        return pixelToGridIdx( a, N, M ) < pixelToGridIdx( b, N, M );
+        return pixelToGridIdx (a, N, M) < pixelToGridIdx (b, N, M);
     }
 };
 
@@ -566,22 +649,30 @@ struct IsFoundParticle
     __host__ __device__
         bool operator()( const Particle p )
     {
-        return p.pState == Particle::State::SEVER && p.nContributingSlices > 2;
+        return p.parent == nullptr;
     }
 };
-
-struct IsFoundParticleInSlice
+struct IsNotFoundParticle
 {
-    int ixSlice;
-    IsFoundParticleInSlice(int _ixSlice) :
-        ixSlice(_ixSlice)
-    {}
     __host__ __device__
         bool operator()(const Particle p)
     {
-        return p.ixCenterSlice == ixSlice && p.pState == Particle::State::SEVER && p.nContributingSlices > 2;
+        return p.parent != nullptr;
     }
 };
+
+//struct IsFoundParticleInSlice
+//{
+//    int ixSlice;
+//    IsFoundParticleInSlice(int _ixSlice) :
+//        ixSlice(_ixSlice)
+//    {}
+//    __host__ __device__
+//        bool operator()(const Particle p)
+//    {
+//        return p.ixCenterSlice == ixSlice && p.pState == Particle::State::SEVER && p.nContributingSlices > 2;
+//    }
+//};
 
 // Constructor and destructor must be implemented here
 ParticleFinder::Solver::Solver():
@@ -591,9 +682,14 @@ ParticleFinder::Solver::Solver():
 ParticleFinder::Solver::~Solver()
 {}
 
-int ParticleFinder::Solver::FindParticlesInImage( int nSliceIdx, GpuMat d_Input, GpuMat d_FilteredImage, GpuMat d_ThreshImg, GpuMat d_ParticleImg, bool bLinkParticles /*= true*/, std::vector<FoundParticle> * pParticlesInImg /*= nullptr*/ )
+int ParticleFinder::Solver::FindParticlesInImage( int stackNum, int nSliceIdx, GpuMat d_Input, GpuMat d_FilteredImage, GpuMat d_ThreshImg, GpuMat d_ParticleImg, bool bLinkParticles /*= true*/, std::vector<FoundParticle> * pParticlesInImg /*= nullptr*/ )
 {
-    return m_upSolverImpl->FindParticlesInImage( nSliceIdx, d_Input, d_FilteredImage, d_ThreshImg, d_ParticleImg, bLinkParticles, pParticlesInImg );
+    return m_upSolverImpl->FindParticlesInImage( stackNum, nSliceIdx, d_Input, d_FilteredImage, d_ThreshImg, d_ParticleImg, bLinkParticles, pParticlesInImg );
+}
+
+int ParticleFinder::Solver::LinkFoundParticles ()
+{
+    return m_upSolverImpl->LinkFoundParticles ();
 }
 
 ParticleFinder::Solver::impl::impl() :
@@ -602,8 +698,8 @@ ParticleFinder::Solver::impl::impl() :
     m_uMinSliceCount( 3 ),
     m_uMaxSliceCount( 5 ),
     m_fNeighborRadius( 5 ),
-    m_uMaxLevel( 3 ),
-    m_uCurPrevParticleCount( 0 )
+    m_uMaxLevel( 3 )
+    //,m_uCurPrevParticleCount( 0 )
 {}
 
 void ParticleFinder::Solver::impl::Init()
@@ -659,19 +755,19 @@ void ParticleFinder::Solver::impl::Init()
 
 // This function removes particles from the vector of previously found particles if they
 // pass the predicate MaybeRemoveParticle
-size_t ParticleFinder::Solver::impl::cullExistingParticles( int curSliceIdx )
-{
-    size_t u_preremovePrevParticleCount = m_uCurPrevParticleCount;
-    auto itLastPrevParticleEnd = m_dPrevParticleVec.begin() + m_uCurPrevParticleCount;
-    auto itCurPrevParticleEnd = thrust::remove_if( m_dPrevParticleVec.begin(), itLastPrevParticleEnd, MaybeRemoveParticle( curSliceIdx, m_uMinSliceCount ) );
-    m_uCurPrevParticleCount = itCurPrevParticleEnd - m_dPrevParticleVec.begin();
-    size_t nRemovedParticles = u_preremovePrevParticleCount - m_uCurPrevParticleCount;
-
-    return nRemovedParticles;
-}
+//size_t ParticleFinder::Solver::impl::cullExistingParticles( int curSliceIdx )
+//{
+//    size_t u_preremovePrevParticleCount = m_uCurPrevParticleCount;
+//    auto itLastPrevParticleEnd = m_dPrevParticleVec.begin() + m_uCurPrevParticleCount;
+//    auto itCurPrevParticleEnd = thrust::remove_if( m_dPrevParticleVec.begin(), itLastPrevParticleEnd, MaybeRemoveParticle( curSliceIdx, m_uMinSliceCount ) );
+//    m_uCurPrevParticleCount = itCurPrevParticleEnd - m_dPrevParticleVec.begin();
+//    size_t nRemovedParticles = u_preremovePrevParticleCount - m_uCurPrevParticleCount;
+//
+//    return nRemovedParticles;
+//}
 
 // Given the processed particle image, this function finds the particle locations and returns a vector of Particle objects
-ParticleFinder::Solver::impl::ParticleVec ParticleFinder::Solver::impl::findNewParticles( UcharVec& d_ParticleImgVec, Floatptr pThreshImg, int N, int sliceIdx )
+ParticleFinder::Solver::impl::ParticleVec ParticleFinder::Solver::impl::findNewParticles( int stackNum, UcharVec& d_ParticleImgVec, Floatptr pThreshImg, int N, int sliceIdx )
 {
     // Create pointers to our kernels
     Floatptr d_pCirleKernel( (float *) m_dCircleMask.data );
@@ -694,9 +790,9 @@ ParticleFinder::Solver::impl::ParticleVec ParticleFinder::Solver::impl::findNewP
     ParticleVec d_NewParticleVec( newParticleCount );
     thrust::transform( d_NewParticleIndicesVec.begin(), d_NewParticleIndicesVec.begin() + newParticleCount, d_NewParticleVec.begin(),
 #if SOLVER_DEVICE
-                       MakeParticleFromIdx( sliceIdx, N, m_uMaskRadius, pThreshImg.get(), d_pCirleKernel.get(), d_pRxKernel.get(), d_pRyKernel.get(), d_pR2Kernel.get() ) );
+                       MakeParticleFromIdx(stackNum, sliceIdx, N, m_uMaskRadius, pThreshImg.get(), d_pCirleKernel.get(), d_pRxKernel.get(), d_pRyKernel.get(), d_pR2Kernel.get() ) );
 #else
-                       MakeParticleFromIdx(sliceIdx, N, m_uMaskRadius, pThreshImg, d_pCirleKernel, d_pRxKernel, d_pRyKernel, d_pR2Kernel) );
+                       MakeParticleFromIdx(stackNum, sliceIdx, N, m_uMaskRadius, pThreshImg, d_pCirleKernel, d_pRxKernel, d_pRyKernel, d_pR2Kernel) );
 #endif
 
     return d_NewParticleVec;
@@ -706,7 +802,7 @@ ParticleFinder::Solver::impl::ParticleVec ParticleFinder::Solver::impl::findNewP
 void ParticleFinder::Solver::impl::createGridCells( int N )
 {
     // We don't bother if there are no previous particles
-    if ( m_dPrevParticleVec.empty() )
+    if ( m_vParticles.empty() )
         return;
 
     // If our grid cell vectors are empty, create them now
@@ -726,10 +822,10 @@ void ParticleFinder::Solver::impl::createGridCells( int N )
     using pixelToGridIdxIter = thrust::transform_iterator < PixelToGridIdx, particleIter >;
 
     // Create an iterator to the end of our current previous particle container (might not be m_dPrevParticleVec.end())
-    auto itCurPrevParticleEnd = m_dPrevParticleVec.begin() + m_uCurPrevParticleCount;
+    auto itCurPrevParticleEnd = m_vParticles.back().end ();
 
     // Create the transform iterator that iterates over our previous particles and returns their grid indices
-    pixelToGridIdxIter itPrevParticleBegin = thrust::make_transform_iterator<PixelToGridIdx, particleIter>( m_dPrevParticleVec.begin(), PixelToGridIdx( N, m_uMaxLevel ) );
+    pixelToGridIdxIter itPrevParticleBegin = thrust::make_transform_iterator<PixelToGridIdx, particleIter>(m_vParticles.back ().begin(), PixelToGridIdx( N, m_uMaxLevel ) );
     pixelToGridIdxIter itPrevParticleEnd = thrust::make_transform_iterator<PixelToGridIdx, particleIter>( itCurPrevParticleEnd, PixelToGridIdx( N, m_uMaxLevel ) );
 
     // Find the ranges of previous particless
@@ -738,23 +834,47 @@ void ParticleFinder::Solver::impl::createGridCells( int N )
     thrust::upper_bound( itPrevParticleBegin, itPrevParticleEnd, thrust::counting_iterator<int>( 0 ), thrust::counting_iterator<int>( nTotalCells ), m_dGridCellUpperBoundVec.begin() );
 }
 
+struct Particle2Ptr
+{
+    Particle2Ptr () = default;
+
+    Particle* operator() (Particle& p)
+    {
+        return &p;
+    }
+};
+
 // For each new particle, given the range of previous particles to search through, find the best match and return a pointer to its address
 // If the pointer is null, then no match was found
 ParticleFinder::Solver::impl::ParticlePtrVec ParticleFinder::Solver::impl::findParticleMatches( ParticleVec& d_NewParticleVec, int N, int sliceIdx )
 {
-    ParticlePtrVec d_ParticleMatchVec( d_NewParticleVec.size(), (Particle *)nullptr );
-
     // Only go through this is there are cells we could match with
-    if ( m_dPrevParticleVec.empty() == false )
-        thrust::transform( d_NewParticleVec.begin(), d_NewParticleVec.end(), d_ParticleMatchVec.begin(),
+    if (!m_vParticles.empty ())
+    {
+        ParticlePtrVec d_ParticleMatchVec (d_NewParticleVec.size (), (Particle*)nullptr);
+
+        thrust::transform (d_NewParticleVec.begin (), d_NewParticleVec.end (), d_ParticleMatchVec.begin (),
 #if SOLVER_DEVICE
-        ParticleMatcher( N, m_uMaxLevel, sliceIdx, m_uMaxSliceCount, m_dGridCellLowerBoundVec.size(), m_uNeighborRadius, m_dGridCellLowerBoundVec.data().get(), m_dGridCellUpperBoundVec.data().get(), m_dPrevParticleVec.data().get() ) );
+            ParticleMatcher (N, m_uMaxLevel, sliceIdx, m_uMaxSliceCount, m_dGridCellLowerBoundVec.size (), m_fNeighborRadius, m_dGridCellLowerBoundVec.data ().get (), m_dGridCellUpperBoundVec.data ().get (), m_vParticles.back ().data ().get ()));
 #else
-        ParticleMatcher(N, m_uMaxLevel, sliceIdx, m_uMaxSliceCount, m_dGridCellLowerBoundVec.size(), m_uNeighborRadius, m_dGridCellLowerBoundVec.data(), m_dGridCellUpperBoundVec.data(), m_dPrevParticleVec.data()) );
+            ParticleMatcher (N, m_uMaxLevel, sliceIdx, m_uMaxSliceCount, m_dGridCellLowerBoundVec.size (), m_fNeighborRadius, m_dGridCellLowerBoundVec.data (), m_dGridCellUpperBoundVec.data (), m_vParticles.back ().data ()));
 #endif
 
-    return d_ParticleMatchVec;
+        return d_ParticleMatchVec;
+    }
+
+    return {};
 }
+
+struct CheckParticleParent 
+{
+    CheckParticleParent () = default;
+
+    bool operator()(const Particle p)
+    {
+        return p.parent == nullptr;
+    }
+};
 
 // For every matched particle, update its intensity state / position
 void ParticleFinder::Solver::impl::updateMatchedParticles( ParticleVec& d_NewParticleVec, ParticlePtrVec& d_ParticleMatchVec, int sliceIdx )
@@ -764,16 +884,16 @@ void ParticleFinder::Solver::impl::updateMatchedParticles( ParticleVec& d_NewPar
     auto itNewParticleToMatchedParticleEnd = thrust::make_zip_iterator( thrust::make_tuple( d_NewParticleVec.end(), d_ParticleMatchVec.end() ) );
 
     // If there was a match, update the intensity state. I don't know how to do a for_each_if other than a transform_if that discards the output
-    thrust::transform_if( itNewParticleToMatchedParticleBegin, itNewParticleToMatchedParticleEnd, thrust::discard_iterator<>(), UpdateMatchedParticle( sliceIdx ), CheckIfMatchIsNotNull() );
+    thrust::transform_if (itNewParticleToMatchedParticleBegin, itNewParticleToMatchedParticleEnd, thrust::discard_iterator<> (), AssignParticleParent (), DetermineIfMatched (m_uMinSliceCount, m_uMaxSliceCount));
 
-#if _DEBUG
-    // Useful for me to know how these start to spread out on debug
-    auto itCurPrevParticleEnd = m_dPrevParticleVec.begin() + m_uCurPrevParticleCount;
-    size_t numInNoMatch = thrust::count_if(m_dPrevParticleVec.begin(), itCurPrevParticleEnd, IsParticleInState(Particle::State::NO_MATCH));
-    size_t numInIncreasing = thrust::count_if( m_dPrevParticleVec.begin(), itCurPrevParticleEnd,IsParticleInState(Particle::State::INCREASING));
-    size_t numInDecreasing = thrust::count_if( m_dPrevParticleVec.begin(), itCurPrevParticleEnd,IsParticleInState(Particle::State::DECREASING));
-    size_t numInSever = thrust::count_if( m_dPrevParticleVec.begin(), itCurPrevParticleEnd, IsParticleInState(Particle::State::SEVER));
-#endif
+//#if _DEBUG
+//    // Useful for me to know how these start to spread out on debug
+//    auto itCurPrevParticleEnd = m_dPrevParticleVec.begin() + m_uCurPrevParticleCount;
+//    size_t numInNoMatch = thrust::count_if(m_dPrevParticleVec.begin(), itCurPrevParticleEnd, IsParticleInState(Particle::State::NO_MATCH));
+//    size_t numInIncreasing = thrust::count_if( m_dPrevParticleVec.begin(), itCurPrevParticleEnd,IsParticleInState(Particle::State::INCREASING));
+//    size_t numInDecreasing = thrust::count_if( m_dPrevParticleVec.begin(), itCurPrevParticleEnd,IsParticleInState(Particle::State::DECREASING));
+//    size_t numInSever = thrust::count_if( m_dPrevParticleVec.begin(), itCurPrevParticleEnd, IsParticleInState(Particle::State::SEVER));
+//#endif
 }
 
 // For the particles that weren't matched, stream compact them into a vector and return it
@@ -796,29 +916,350 @@ ParticleFinder::Solver::impl::ParticleVec ParticleFinder::Solver::impl::consolid
     return d_UnmatchedParticleVec;
 }
 
-// Given our previous particles and the newly found unmatched particles, merge them into a sorted container
-void ParticleFinder::Solver::impl::mergeUnmatchedParticles( ParticleVec& d_UnmatchedParticleVec, int N )
+// apply to parents to get proper initial values
+struct initFoundParticles
 {
-    // We have two options here; the easy option is to just tack these new particles onto the previous particle vector and sort the whole thing
-    // alternatively you could set a flag in previous particles if the matching process caused them to move to a new grid cell and then treat those particles as unmatched
-    // you could then sort the unmatched particles (relatively few compared to the count of previous particles) and then merge them into the prev particle vec, which is still sorted
-    // Below is the first option, whihc was easier.
+    float _xyFactor{ 0.0803000033f };
+    thrust_operator
+    int operator()(Particle& p)
+    {
+        p.x *= p.i;
+        p.y *= p.i;
+        p.z *= p.i;
 
-    // first make room for the new particles, if we need it
-    size_t newPrevParticleCount = d_UnmatchedParticleVec.size() + m_uCurPrevParticleCount;
-    if ( newPrevParticleCount > m_dPrevParticleVec.size() )
-        m_dPrevParticleVec.resize( newPrevParticleCount );
+        p.r2 *= _xyFactor;
 
-    // copy unmatched particles onto the original end of the previous particle vec
-    auto itNewParticleDest = m_dPrevParticleVec.begin() + m_uCurPrevParticleCount;
-    auto itEndOfPrevParticles = thrust::copy( d_UnmatchedParticleVec.begin(), d_UnmatchedParticleVec.end(), itNewParticleDest );
+        return 0;
+    }
+};
+// apply to children to reduce into parent
+struct computeAverageSum
+{
+    float _xyFactor{ 0.0803000033f };
+    thrust_operator
+    int operator()(Particle p)
+    {
+        p.parent->x += p.i * p.x;
+        p.parent->y += p.i * p.y;
+        p.parent->z += p.i * p.z;
 
-    // Sort the whole thing
-    thrust::sort( m_dPrevParticleVec.begin(), itEndOfPrevParticles, ParticleOrderingComp( N, m_uMaxLevel ) );
-    m_uCurPrevParticleCount = newPrevParticleCount;
+        p.parent->r2 = fmaxf (_xyFactor * p.r2, p.parent->r2);
+
+        p.parent->i += p.i;
+
+        return 0;
+    }
+};
+// apply to parent to get averaged positions
+struct averageParticlePositions
+{
+    float _xyFactor{ 0.0803000033f };
+    float _zFactor{ 0.293799996f };
+    thrust_operator
+    int operator()(Particle& p)
+    {
+        p.x *= _xyFactor / p.i;
+        p.y *= _xyFactor / p.i;
+        p.z *= _zFactor / p.i;
+        
+        return 0;
+    }
+};
+// apply to parent to get averaged positions
+struct checkParticleBoundaries
+{
+    float _minX, _minY, _minZ;
+    float _maxX, _maxY, _maxZ;
+    
+    checkParticleBoundaries(float minX, float minY, float minZ,
+                            float maxX, float maxY, float maxZ)
+    : _minX(minX), 
+      _minY(minY), 
+      _minZ(minZ), 
+      _maxX(maxX), 
+      _maxY(maxY), 
+      _maxZ(maxZ)
+    {}
+
+    thrust_operator    
+    bool operator()(Particle p)
+    {
+        return
+            (p.x > _minX) && (p.x < _maxX) &&
+            (p.y > _minY) && (p.y < _maxY) &&
+            (p.z > _minZ) && (p.x < _maxZ);
+    }
+};
+
+template<const int N>
+struct MinVectorElement
+{
+    thrust_operator
+    bool operator()(const Particle& A, const Particle& B) const
+    {
+        const float* aPos = &A.x;
+        const float* bPos = &B.x;
+        return aPos[N] < bPos[N];
+    }
+};
+
+    //float xpos = 0, ypos = 0, cur_xpos = 0, cur_ypos = 0, r2 = 0;
+    //auto itPrev = m_vParticles.begin ();
+    //auto itCur = std::next (itPrev);
+    //float max_r2_dev = m_fNeighborRadius * m_fNeighborRadius;
+    //int i = itPrev->size();
+    //for (;itCur != m_vParticles.end(); ++itPrev, ++itCur)
+    //{
+    //    for (auto& curParticle : *itCur)
+    //    {
+    //        //read the current x and y positions of a given particle in the present slice
+    //        cur_xpos = curParticle.x;
+    //        cur_ypos = curParticle.y;
+    //        for (auto& prevParticle : *itPrev)
+    //        {
+    //            auto sizeCur = itCur->size ();
+    //            auto sizePrev = itPrev->size ();
+
+    //            //loop through all particles in the previous slice, and see if any is within the radial threshold
+    //            xpos = prevParticle.x;
+    //            ypos = prevParticle.y;
+    //            r2 = (cur_xpos - xpos) * (cur_xpos - xpos) + (cur_ypos - ypos) * (cur_ypos - ypos);
+    //            if (r2 < max_r2_dev) {
+    //                //check to see if current kth particle (in jth slice) is within the threshold of the lth particle in the (j-1)st slice
+    //                //if so, assign the particle index, increment the slice count, and keep track of row number of lth particle
+    //                curParticle.parent = &prevParticle;
+    //                curParticle.nContributingSlices = prevParticle.nContributingSlices + 1;
+    //            }
+    //        }
+    //    }
+
+    //    //if too many slices are considered the same particle (if the slice count is above max_slices), then
+    //    //split into two particles, assign new indices, and continue
+
+    //    //variables to hold intensity information for a given particle in a given slice, and for the same particle one slice up
+    //    float current_intensity = 0, previous_intensity = 0;
+    //    int previous_index = 0;
+
+    //    for (auto& curParticle : *itCur)
+    //    {
+    //        //check slices after minimum to see if intensity is going in the wrong direction (i.e. increasing)
+    //        //Disable check for execution mode 2
+    //        //this is NOT a hard cutoff (cf. hard cutoff below if things are getting ridiculous)
+    //        if (curParticle.nContributingSlices >= m_uMinSliceCount) {
+    //            current_intensity = curParticle.i;
+    //            previous_intensity = curParticle.parent->i;
+
+    //            //Check to see if intensity is INCREASING: if already through brightness maximum, should
+    //            //monotonically decrease as function of z; an increase is a new particle.
+    //            //In this case, assign new particle index and reset slice count.
+    //            //Disable check for execution mode 2
+    //            if (current_intensity > previous_intensity) {
+    //                i++;
+    //                curParticle.parent = nullptr;
+    //                curParticle.nContributingSlices = 0;
+    //                continue;
+    //            }
+    //        }
+
+    //        //hard cutoff if too many slices still
+    //        if (curParticle.nContributingSlices >= m_uMaxSliceCount) {
+    //            i++;
+    //            curParticle.nContributingSlices = 0;
+    //            curParticle.parent = nullptr;
+    //        }
+    //        //if no match, assign new particle index (check to see if new particle; if so, assign new index)
+    //        else if (curParticle.parent == nullptr) {
+    //            i++;
+    //        }
+    //    }
+    //}
+
+struct SeverParticle
+{
+    thrust_operator
+    int operator()(Particle& p)
+    {
+        p.parent = nullptr;
+        p.nContributingSlices = 0;
+
+        return 0;
+    }
+};
+struct CheckParticleRadius
+{
+    Particle* prevParticles;
+    Particle* curParticles;
+    int prevParticleCount;
+    float r2Max;
+
+    thrust_operator
+    bool operator()(int idx)
+    {
+        int ixPrev = idx % prevParticleCount;
+        int ixCur = idx / prevParticleCount;
+        Particle& prev = prevParticles[ixPrev];
+        Particle& cur = curParticles[ixCur];
+
+        float dX = prev.x - cur.x;
+        float dY = prev.y - cur.y;
+        float r2 = (dX * dX + dY * dY);
+        return r2 < r2Max;
+    }
+};
+struct AttachParticle
+{
+    Particle* prevParticles;
+    Particle* curParticles;
+    int prevParticleCount;
+
+    thrust_operator 
+    int operator() (const int idx)
+    {
+        int ixPrev = idx % prevParticleCount;
+        int ixCur = idx / prevParticleCount;
+        Particle& prev = prevParticles[ixPrev];
+        Particle& cur = curParticles[ixCur];
+
+#if SOLVER_DEVICE
+        unsigned long long int* parentAddr = (unsigned long long int*)&cur.parent;
+        unsigned long long int newParent = (unsigned long long int)(prev.parent ? prev.parent : &prev);
+        unsigned long long int* matchAddr = (unsigned long long int*) &cur.match;
+        unsigned long long int newMatch = (unsigned long long int)(&prev);
+        atomicExch (parentAddr, newParent);
+        atomicExch (matchAddr, newMatch);
+        atomicExch (&cur.nContributingSlices, prev.nContributingSlices + 1);
+#else
+        Particle* newParent = prev.parent ? prev.parent : &prev;
+        cur.parent = prev.parent ? prev.parent : &prev;
+        cur.nContributingSlices = prev.nContributingSlices + 1;
+#endif
+
+        return 0;
+    }
+};
+struct ShouldSeverParticle
+{
+    int minSlices;
+    int maxSlices;
+
+    thrust_operator
+    bool operator()(Particle p)
+    {
+        if (p.nContributingSlices >= minSlices)
+        {
+            if (p.i > p.match->i)
+                return true;
+            return (p.nContributingSlices >= maxSlices);
+        }
+
+        return false;
+    }
+};
+
+int ParticleFinder::Solver::impl::LinkFoundParticles ()
+{
+    auto itPrev = m_vParticles.begin ();
+    auto itCur = std::next (itPrev);
+    float max_r2_dev = m_fNeighborRadius * m_fNeighborRadius;
+    
+    SeverParticle severParticle;
+    ShouldSeverParticle shouldSeverParticle { m_uMinSliceCount, m_uMaxSliceCount };
+    size_t count = thrust::count_if (itPrev->begin (), itPrev->end (), IsFoundParticle ());
+    int sliceIdx = 1;
+    for (; itCur != m_vParticles.end (); ++itPrev, ++itCur, sliceIdx++)
+    {
+        int numParticlePairs = itCur->size() * itPrev->size ();
+        int numPrev = itPrev->size ();
+
+        auto itDetectParticleBegin = thrust::counting_iterator<int> (0);
+        auto itDetectParticleEnd = itDetectParticleBegin + numParticlePairs;
+#if SOLVER_DEVICE
+        CheckParticleRadius checkParticleRadius{ itPrev->data ().get (), itCur->data ().get (), numPrev, max_r2_dev };
+        AttachParticle attachParticle{ itPrev->data ().get (), itCur->data ().get (), numPrev };
+#else
+        CheckParticleRadius checkParticleRadius { itPrev->data (), itCur->data (), numPrev, max_r2_dev };
+        AttachParticle attachParticle { itPrev->data (), itCur->data (), numPrev };
+#endif
+        thrust::transform_if (thrust_exec, itDetectParticleBegin, itDetectParticleEnd, thrust::discard_iterator<> (), attachParticle, checkParticleRadius);
+
+        thrust::transform_if (itCur->begin (), itCur->end (), thrust::discard_iterator<> (), severParticle, shouldSeverParticle);
+        count = thrust::count_if (itCur->begin (), itCur->end (), IsFoundParticle ());
+    }
+
+    count = 0;
+    for (auto& particles : m_vParticles)
+        count += thrust::count_if (particles.begin (), particles.end (), IsFoundParticle ());
+
+    // init found particles
+    for (auto& particles : m_vParticles)
+        thrust::transform_if (particles.begin (), particles.end (), thrust::discard_iterator<> (), initFoundParticles (), IsFoundParticle ());
+
+    // reduce children into found particles
+    for (auto& particles : m_vParticles)
+        thrust::transform_if (particles.begin (), particles.end (), thrust::discard_iterator<> (), computeAverageSum (), IsNotFoundParticle ());
+    
+    // average positions
+    for (auto& particles : m_vParticles)
+        thrust::transform_if (particles.begin (), particles.end (), thrust::discard_iterator<> (), averageParticlePositions (), IsFoundParticle ());
+
+    //float boundary_r{ 0.100000001f };
+    //float minX {1000.f};
+    //float minY {1000.f};
+    //float minZ {1000.f};
+    //float maxX {-1.f};
+    //float maxY {-1.f};
+    //float maxZ {-1.f};
+
+    //// remove child particles, filter particles outside boundary
+    //for (auto& particles : m_vParticles)
+    //{
+    //    auto it = thrust::remove_if (particles.begin (), particles.end (), IsNotFoundParticle ());
+    //    particles.erase (it, particles.end ());
+
+    //    auto X = thrust::minmax_element (particles.begin (), particles.end (), MinVectorElement<0> ());
+    //    auto Y = thrust::minmax_element (particles.begin (), particles.end (), MinVectorElement<1> ());
+    //    auto Z = thrust::minmax_element (particles.begin (), particles.end (), MinVectorElement<2> ());
+    //    minX = std::min(minX, (*X.first).x + boundary_r);
+    //    minY = std::min(minY, (*Y.first).y + boundary_r);
+    //    minZ = std::min(minZ, (*Z.first).z + boundary_r);
+    //    maxX = std::max(maxX, (*X.second).x - boundary_r);
+    //    maxY = std::max(maxY, (*Y.second).y - boundary_r);
+    //    maxZ = std::max(maxZ, (*Z.second).z - boundary_r);
+
+    //}
+
+    //for (auto& particles : m_vParticles)
+    //{
+    //    auto it = thrust::remove_if (particles.begin (), particles.end (), checkParticleBoundaries (minX, minY, minZ, maxX, maxY, maxZ));
+    //    particles.erase (it, particles.end ());
+    //}
+
+    return 0;
 }
 
-int ParticleFinder::Solver::impl::FindParticlesInImage( int nSliceIdx, GpuMat d_Input, GpuMat d_FilteredImage, GpuMat d_ThreshImg, GpuMat d_ParticleImg, bool bLinkParticles, std::vector<FoundParticle> * pParticlesInImg )
+// Given our previous particles and the newly found unmatched particles, merge them into a sorted container
+//void ParticleFinder::Solver::impl::mergeUnmatchedParticles( ParticleVec& d_UnmatchedParticleVec, int N )
+//{
+//    // We have two options here; the easy option is to just tack these new particles onto the previous particle vector and sort the whole thing
+//    // alternatively you could set a flag in previous particles if the matching process caused them to move to a new grid cell and then treat those particles as unmatched
+//    // you could then sort the unmatched particles (relatively few compared to the count of previous particles) and then merge them into the prev particle vec, which is still sorted
+//    // Below is the first option, whihc was easier.
+//
+//    // first make room for the new particles, if we need it
+//    size_t newPrevParticleCount = d_UnmatchedParticleVec.size() + m_uCurPrevParticleCount;
+//    if ( newPrevParticleCount > m_dPrevParticleVec.size() )
+//        m_dPrevParticleVec.resize( newPrevParticleCount );
+//
+//    // copy unmatched particles onto the original end of the previous particle vec
+//    auto itNewParticleDest = m_dPrevParticleVec.begin() + m_uCurPrevParticleCount;
+//    auto itEndOfPrevParticles = thrust::copy( d_UnmatchedParticleVec.begin(), d_UnmatchedParticleVec.end(), itNewParticleDest );
+//
+//    // Sort the whole thing
+//    thrust::sort( m_dPrevParticleVec.begin(), itEndOfPrevParticles, ParticleOrderingComp( N, m_uMaxLevel ) );
+//    m_uCurPrevParticleCount = newPrevParticleCount;
+//}
+
+int ParticleFinder::Solver::impl::FindParticlesInImage( int stackNum, int nSliceIdx, GpuMat d_Input, GpuMat d_FilteredImage, GpuMat d_ThreshImg, GpuMat d_ParticleImg, bool bLinkParticles, std::vector<FoundParticle> * pParticlesInImg )
 {
     // Make sure we've initialized something
     if (m_dRadSqKernel.empty())
@@ -845,11 +1286,12 @@ int ParticleFinder::Solver::impl::FindParticlesInImage( int nSliceIdx, GpuMat d_
 #endif
 
     // Cull the herd
-    size_t numParticlesRemoved = cullExistingParticles( nSliceIdx );
+    size_t numParticlesRemoved = 0;// cullExistingParticles (nSliceIdx);
 
     // Find new particles
-    ParticleVec d_NewParticleVec = findNewParticles( d_ParticleImgVec, d_pThreshImgBuf, N, nSliceIdx );
+    ParticleVec d_NewParticleVec = findNewParticles( stackNum, d_ParticleImgVec, d_pThreshImgBuf, N, nSliceIdx );
     size_t numParticlesFound = d_NewParticleVec.size();
+    thrust::sort (d_NewParticleVec.begin (), d_NewParticleVec.end (), ParticleOrderingComp (N, m_uMaxLevel));
 
     // Store new particles if requested
     if ( pParticlesInImg )
@@ -873,78 +1315,93 @@ int ParticleFinder::Solver::impl::FindParticlesInImage( int nSliceIdx, GpuMat d_
     if (bLinkParticles == false)
         return (int)numParticlesFound;
 
+
+    if (nSliceIdx == 0)
+    {
+        m_vParticles.emplace_back (std::move (d_NewParticleVec));
+        return numParticlesFound;
+    }
+
     // Initialize grid cells given current container of previous particles
-    createGridCells( N );
+    //createGridCells( N );
 
-    // Tranform new particles into a vector of particle pointers; if they are null then no match was found (?)
-    ParticlePtrVec d_ParticleMatchVec = findParticleMatches( d_NewParticleVec, N, nSliceIdx );
+    //// Tranform new particles into a vector of particle pointers; if they are null then no match was found (?)
+    //ParticlePtrVec d_ParticleMatchVec = findParticleMatches( d_NewParticleVec, N, nSliceIdx );
 
-    // For particles we were able to match, update their intensity states
-    updateMatchedParticles( d_NewParticleVec, d_ParticleMatchVec, nSliceIdx );
+    //// For particles we were able to match, update their intensity states
+    //updateMatchedParticles( d_NewParticleVec, d_ParticleMatchVec, nSliceIdx );
+    m_vParticles.emplace_back (std::move (d_NewParticleVec));
 
-    // Copy all unmatched particles into a new vector; we copy a tuple of new particles and pointers to matches, discarding the pointers
-    ParticleVec d_UnmatchedParticleVec = consolidateUnmatchedParticles( d_NewParticleVec, d_ParticleMatchVec );
+    //// Copy all unmatched particles into a new vector; we copy a tuple of new particles and pointers to matches, discarding the pointers
+    //ParticleVec d_UnmatchedParticleVec = consolidateUnmatchedParticles( d_NewParticleVec, d_ParticleMatchVec );
 
-    // Merge unmatched particles into our container, preserving grid index order
-    mergeUnmatchedParticles( d_UnmatchedParticleVec, N );
+    //// Merge unmatched particles into our container, preserving grid index order
+    //mergeUnmatchedParticles( d_UnmatchedParticleVec, N );
 
-#if _DEBUG
-    std::cout << "Slice Idx:\t" << nSliceIdx << "\tNew Particles:\t" << numParticlesFound << "\tUnmatched Particles:\t" << d_UnmatchedParticleVec.size() << "\tFound Particles:\t" << m_uCurPrevParticleCount << "\tCulled Particles:\t" << numParticlesRemoved << std::endl;
-#endif
+//#if _DEBUG
+//    std::cout << "Slice Idx:\t" << nSliceIdx << "\tNew Particles:\t" << numParticlesFound << "\tUnmatched Particles:\t" << d_UnmatchedParticleVec.size() << "\tFound Particles:\t" << m_uCurPrevParticleCount << "\tCulled Particles:\t" << numParticlesRemoved << std::endl;
+//#endif
 
-    return m_uCurPrevParticleCount;
+    return numParticlesFound;
 }
 
 std::vector<ParticleFinder::FoundParticle> ParticleFinder::Solver::impl::GetFoundParticles() const
 {
-    // Convert all found particles to the foundparticle type
-    // Reserve enough space for all previously found, though the actual may be less
-    ParticleVec d_vFoundParticles( m_uCurPrevParticleCount );
+    return {};
+    //// Convert all found particles to the foundparticle type
+    //// Reserve enough space for all previously found, though the actual may be less
+    //ParticleVec d_vFoundParticles( m_dPrevParticleVec.size() );
 
-    // We consider a particle "found" if it's intensity state is severed
-    auto itParticleEnd = thrust::copy_if( m_dPrevParticleVec.begin(), m_dPrevParticleVec.end(), d_vFoundParticles.begin(), IsFoundParticle() );
-    if ( itParticleEnd == d_vFoundParticles.begin() )
-        return{};
+    //// We consider a particle "found" if it's intensity state is severed
+    //auto itParticleEnd = thrust::copy_if( m_dPrevParticleVec.begin(), m_dPrevParticleVec.end(), d_vFoundParticles.begin(), IsFoundParticle() );
+    //if ( itParticleEnd == d_vFoundParticles.begin() )
+    //    return{};
 
-    int nParticles = itParticleEnd - d_vFoundParticles.begin();
+    //int nParticles = itParticleEnd - d_vFoundParticles.begin();
 
-    //
+    ////
 
-    // Transform all found particles that meet the IsFoundParticle criterion into FoundParticles
-    FoundParticleVec d_vTransformedFoundParticles( nParticles );
-    thrust::transform( d_vFoundParticles.begin(), itParticleEnd, d_vTransformedFoundParticles.begin(), Particle2FoundParticle());
+    //// Transform all found particles that meet the IsFoundParticle criterion into FoundParticles
+    //FoundParticleVec d_vTransformedFoundParticles( nParticles );
+    //thrust::transform( d_vFoundParticles.begin(), itParticleEnd, d_vTransformedFoundParticles.begin(), Particle2FoundParticle());
 
-    // Download to host, return
-    std::vector<ParticleFinder::FoundParticle> vRet( nParticles );
-    thrust::copy( d_vTransformedFoundParticles.begin(), d_vTransformedFoundParticles.end(), vRet.begin());
+    //// Download to host, return
+    //std::vector<ParticleFinder::FoundParticle> vRet( nParticles );
+    //thrust::copy( d_vTransformedFoundParticles.begin(), d_vTransformedFoundParticles.end(), vRet.begin());
 
-    return vRet;
+    //std::sort (vRet.begin (), vRet.end (), [](const ParticleFinder::FoundParticle& a, const ParticleFinder::FoundParticle& b)
+    //    {
+    //        return a.fPosZ < b.fPosZ;
+    //    });
+
+    //return vRet;
 }
 
 std::vector<ParticleFinder::FoundParticle> ParticleFinder::Solver::impl::GetFoundParticlesInSlice(int ixSlice) const
 {
-    // Convert all found particles to the foundparticle type
-    // Reserve enough space for all previously found, though the actual may be less
-    ParticleVec d_vFoundParticles( m_uCurPrevParticleCount );
+    return {};
+    //// Convert all found particles to the foundparticle type
+    //// Reserve enough space for all previously found, though the actual may be less
+    //ParticleVec d_vFoundParticles (m_dPrevParticleVec.size ());
 
-    // We consider a particle "found" if it's intensity state is severed
-    auto itParticleEnd = thrust::copy_if( m_dPrevParticleVec.begin(), m_dPrevParticleVec.end(), d_vFoundParticles.begin(), IsFoundParticleInSlice(ixSlice) );
-    if ( itParticleEnd == d_vFoundParticles.begin() )
-        return{};
+    //// We consider a particle "found" if it's intensity state is severed
+    //auto itParticleEnd = thrust::copy_if( m_dPrevParticleVec.begin(), m_dPrevParticleVec.end(), d_vFoundParticles.begin(), IsFoundParticleInSlice(ixSlice) );
+    //if ( itParticleEnd == d_vFoundParticles.begin() )
+    //    return{};
 
-    int nParticles = itParticleEnd - d_vFoundParticles.begin();
+    //int nParticles = itParticleEnd - d_vFoundParticles.begin();
 
-    //
+    ////
 
-    // Transform all found particles that meet the IsFoundParticle criterion into FoundParticles
-    FoundParticleVec d_vTransformedFoundParticles( nParticles );
-    thrust::transform( d_vFoundParticles.begin(), itParticleEnd, d_vTransformedFoundParticles.begin(), Particle2FoundParticle() );
+    //// Transform all found particles that meet the IsFoundParticle criterion into FoundParticles
+    //FoundParticleVec d_vTransformedFoundParticles( nParticles );
+    //thrust::transform( d_vFoundParticles.begin(), itParticleEnd, d_vTransformedFoundParticles.begin(), Particle2FoundParticle() );
 
-    // Download to host, return
-    std::vector<ParticleFinder::FoundParticle> vRet( nParticles );
-    thrust::copy( d_vTransformedFoundParticles.begin(), d_vTransformedFoundParticles.end(), vRet.begin() );
+    //// Download to host, return
+    //std::vector<ParticleFinder::FoundParticle> vRet( nParticles );
+    //thrust::copy( d_vTransformedFoundParticles.begin(), d_vTransformedFoundParticles.end(), vRet.begin() );
 
-    return vRet;
+    //return vRet;
 }
 
 std::vector<ParticleFinder::FoundParticle> ParticleFinder::Solver::GetFoundParticles() const
