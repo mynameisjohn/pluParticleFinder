@@ -929,6 +929,8 @@ struct initFoundParticles
 
         p.r2 *= _xyFactor;
 
+        p.nContributingSlices = 1;
+
         return 0;
     }
 };
@@ -939,6 +941,18 @@ struct computeAverageSum
     thrust_operator
     int operator()(Particle p)
     {
+#if SOLVER_DEVICE
+        atomicAdd (&p.parent->x, p.i * p.x);
+        atomicAdd (&p.parent->y, p.i * p.y);
+        atomicAdd (&p.parent->z, p.i * p.z);
+        atomicAdd (&p.parent->i, p.i);
+
+        // https://stackoverflow.com/a/51549250/1973454
+        // (I took the positive version of this because the radius is always positive
+        atomicMax ((int*)&p.parent->r2, __float_as_int (_xyFactor * p.r2));
+
+        atomicAdd (&p.parent->nContributingSlices, 1);
+#else
         p.parent->x += p.i * p.x;
         p.parent->y += p.i * p.y;
         p.parent->z += p.i * p.z;
@@ -946,6 +960,8 @@ struct computeAverageSum
         p.parent->r2 = fmaxf (_xyFactor * p.r2, p.parent->r2);
 
         p.parent->i += p.i;
+        p.parent->nContributingSlices++;
+#endif
 
         return 0;
     }
@@ -966,28 +982,22 @@ struct averageParticlePositions
     }
 };
 // apply to parent to get averaged positions
-struct checkParticleBoundaries
+struct CheckParticleBoundaries
 {
-    float _minX, _minY, _minZ;
-    float _maxX, _maxY, _maxZ;
-    
-    checkParticleBoundaries(float minX, float minY, float minZ,
-                            float maxX, float maxY, float maxZ)
-    : _minX(minX), 
-      _minY(minY), 
-      _minZ(minZ), 
-      _maxX(maxX), 
-      _maxY(maxY), 
-      _maxZ(maxZ)
-    {}
+    float _minX;
+    float _minY;
+    float _minZ;
+    float _maxX;
+    float _maxY;
+    float _maxZ;
 
     thrust_operator    
-    bool operator()(Particle p)
+    bool operator()(const Particle p)
     {
         return
-            (p.x > _minX) && (p.x < _maxX) &&
-            (p.y > _minY) && (p.y < _maxY) &&
-            (p.z > _minZ) && (p.x < _maxZ);
+            (p.x < _minX) || (p.x > _maxX) ||
+            (p.y < _minY) || (p.y > _maxY) ||
+            (p.z < _minZ) || (p.z > _maxZ);
     }
 };
 
@@ -995,11 +1005,20 @@ template<const int N>
 struct MinVectorElement
 {
     thrust_operator
-    bool operator()(const Particle& A, const Particle& B) const
+    bool operator()(const Particle A, const Particle B) const
     {
         const float* aPos = &A.x;
         const float* bPos = &B.x;
         return aPos[N] < bPos[N];
+    }
+};
+
+struct FilterParticlesBySliceCount
+{
+    int _minSlices;
+    bool operator()(const Particle P)
+    {
+        return P.nContributingSlices < _minSlices;
     }
 };
 
@@ -1145,14 +1164,15 @@ struct ShouldSeverParticle
     thrust_operator
     bool operator()(Particle p)
     {
-        if (p.nContributingSlices >= minSlices)
-        {
-            if (p.i > p.match->i)
-                return true;
-            return (p.nContributingSlices >= maxSlices);
-        }
-
-        return false;
+        return ((p.nContributingSlices >= minSlices) && (p.i > p.match->i)) || (p.nContributingSlices >= maxSlices);
+        // if (p.nContributingSlices >= minSlices)
+        // {
+        //     if (p.i > p.match->i)
+        //         return true;
+        //     return (p.nContributingSlices >= maxSlices);
+        // }
+        // 
+        // return false;
     }
 };
 
@@ -1173,6 +1193,7 @@ int ParticleFinder::Solver::impl::LinkFoundParticles ()
 
         auto itDetectParticleBegin = thrust::counting_iterator<int> (0);
         auto itDetectParticleEnd = itDetectParticleBegin + numParticlePairs;
+
 #if SOLVER_DEVICE
         CheckParticleRadius checkParticleRadius{ itPrev->data ().get (), itCur->data ().get (), numPrev, max_r2_dev };
         AttachParticle attachParticle{ itPrev->data ().get (), itCur->data ().get (), numPrev };
@@ -1180,15 +1201,12 @@ int ParticleFinder::Solver::impl::LinkFoundParticles ()
         CheckParticleRadius checkParticleRadius { itPrev->data (), itCur->data (), numPrev, max_r2_dev };
         AttachParticle attachParticle { itPrev->data (), itCur->data (), numPrev };
 #endif
+
         thrust::transform_if (thrust_exec, itDetectParticleBegin, itDetectParticleEnd, thrust::discard_iterator<> (), attachParticle, checkParticleRadius);
-
         thrust::transform_if (itCur->begin (), itCur->end (), thrust::discard_iterator<> (), severParticle, shouldSeverParticle);
-        count = thrust::count_if (itCur->begin (), itCur->end (), IsFoundParticle ());
-    }
 
-    count = 0;
-    for (auto& particles : m_vParticles)
-        count += thrust::count_if (particles.begin (), particles.end (), IsFoundParticle ());
+        count += thrust::count_if (itCur->begin (), itCur->end (), IsFoundParticle ());
+    }
 
     // init found particles
     for (auto& particles : m_vParticles)
@@ -1197,42 +1215,62 @@ int ParticleFinder::Solver::impl::LinkFoundParticles ()
     // reduce children into found particles
     for (auto& particles : m_vParticles)
         thrust::transform_if (particles.begin (), particles.end (), thrust::discard_iterator<> (), computeAverageSum (), IsNotFoundParticle ());
-    
+
+    count = 0;
+    for (auto& particles : m_vParticles)
+        count += particles.size ();
+    // remove children
+    FilterParticlesBySliceCount filterParticlesBySliceCount{ m_uMinSliceCount };
+    for (auto& particles : m_vParticles)
+    {
+        auto it = thrust::remove_if (particles.begin (), particles.end (), IsNotFoundParticle ());
+        particles.erase (it, particles.end ());
+        it = thrust::remove_if (particles.begin (), particles.end (), filterParticlesBySliceCount);
+        particles.erase (it, particles.end ());
+    }
+
+    count = 0;
+    for (auto& particles : m_vParticles)
+        count += particles.size ();
+
     // average positions
     for (auto& particles : m_vParticles)
-        thrust::transform_if (particles.begin (), particles.end (), thrust::discard_iterator<> (), averageParticlePositions (), IsFoundParticle ());
+        thrust::for_each (particles.begin (), particles.end (), averageParticlePositions ());
 
-    //float boundary_r{ 0.100000001f };
-    //float minX {1000.f};
-    //float minY {1000.f};
-    //float minZ {1000.f};
-    //float maxX {-1.f};
-    //float maxY {-1.f};
-    //float maxZ {-1.f};
+    float boundary_r{ 0.100000001f };
+    float minX {std::numeric_limits<float>::max ()};
+    float minY {std::numeric_limits<float>::max ()};
+    float minZ {std::numeric_limits<float>::max ()};
+    float maxX {std::numeric_limits<float>::min ()};
+    float maxY {std::numeric_limits<float>::min ()};
+    float maxZ {std::numeric_limits<float>::min ()};
 
-    //// remove child particles, filter particles outside boundary
-    //for (auto& particles : m_vParticles)
-    //{
-    //    auto it = thrust::remove_if (particles.begin (), particles.end (), IsNotFoundParticle ());
-    //    particles.erase (it, particles.end ());
+    for (auto& particles : m_vParticles)
+    {
+        auto it = thrust::remove_if (particles.begin (), particles.end (), IsNotFoundParticle ());
+        particles.erase (it, particles.end ());
 
-    //    auto X = thrust::minmax_element (particles.begin (), particles.end (), MinVectorElement<0> ());
-    //    auto Y = thrust::minmax_element (particles.begin (), particles.end (), MinVectorElement<1> ());
-    //    auto Z = thrust::minmax_element (particles.begin (), particles.end (), MinVectorElement<2> ());
-    //    minX = std::min(minX, (*X.first).x + boundary_r);
-    //    minY = std::min(minY, (*Y.first).y + boundary_r);
-    //    minZ = std::min(minZ, (*Z.first).z + boundary_r);
-    //    maxX = std::max(maxX, (*X.second).x - boundary_r);
-    //    maxY = std::max(maxY, (*Y.second).y - boundary_r);
-    //    maxZ = std::max(maxZ, (*Z.second).z - boundary_r);
+        auto X = thrust::minmax_element (particles.begin (), particles.end (), MinVectorElement<0> ());
+        minX = std::min (minX, ((Particle)*X.first).x + boundary_r);
+        maxX = std::max (maxX, ((Particle)*X.second).x - boundary_r);
 
-    //}
+        auto Y = thrust::minmax_element (particles.begin (), particles.end (), MinVectorElement<1> ());
+        minY = std::min (minY, ((Particle)*Y.first).y + boundary_r);
+        maxY = std::max (maxY, ((Particle)*Y.second).y - boundary_r);
 
-    //for (auto& particles : m_vParticles)
-    //{
-    //    auto it = thrust::remove_if (particles.begin (), particles.end (), checkParticleBoundaries (minX, minY, minZ, maxX, maxY, maxZ));
-    //    particles.erase (it, particles.end ());
-    //}
+        auto Z = thrust::minmax_element (particles.begin (), particles.end (), MinVectorElement<2> ());
+        minZ = std::min (minZ, ((Particle)*Z.first).z + boundary_r);
+        maxZ = std::max (maxZ, ((Particle)*Z.second).z - boundary_r);
+    }
+
+    count = 0;
+    CheckParticleBoundaries checkParticleBoundaries{ minX, minY, minZ, maxX, maxY, maxZ };
+    for (auto& particles : m_vParticles)
+    {
+        auto it = thrust::remove_if (particles.begin (), particles.end (), checkParticleBoundaries);
+        particles.erase (it, particles.end ());
+        count += particles.size ();
+    }
 
     return 0;
 }
