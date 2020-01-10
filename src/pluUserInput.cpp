@@ -100,7 +100,7 @@ void ParticleFinder::getUserInput (GpuMat d_Input)
 
             // do DSP, get particles
             std::vector<FoundParticle> vParticlesInImg;
-            doDSPAndFindParticlesInImg (0, d_Input, false, &vParticlesInImg, true);
+            doDSPAndFindParticlesInImg (0, 0, d_Input, false, &vParticlesInImg, true);
 
             // Draw circles in local max image
             if (!vParticlesInImg.empty ())

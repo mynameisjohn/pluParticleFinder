@@ -137,7 +137,7 @@ std::vector<ParticleFinder::FoundParticle>  ParticleFinder::launchTask (std::sha
                 }
 
                 // Find particles in image
-                doDSPAndFindParticlesInImg ((int)i, m_vdInputImages[i], true);
+                doDSPAndFindParticlesInImg (0, (int)i, m_vdInputImages[i], true);
 
                 // Update task with found particles (we have to look at an earlier slice,
                 // as the particle center won't be in the slice we just processed)
@@ -164,7 +164,7 @@ std::vector<ParticleFinder::FoundParticle>  ParticleFinder::launchTask (std::sha
     return{};
 }
 
-int ParticleFinder::doDSPAndFindParticlesInImg(int ixSlice, GpuMat d_Input, bool bLinkParticles /*= true*/, std::vector<FoundParticle> * pFoundParticles /*= nullptr*/, bool bResetKernels /*= false*/)
+int ParticleFinder::doDSPAndFindParticlesInImg(int stackNum, int ixSlice, GpuMat d_Input, bool bLinkParticles /*= true*/, std::vector<FoundParticle> * pFoundParticles /*= nullptr*/, bool bResetKernels /*= false*/)
 {
     if ( bResetKernels || m_dCircleFilter.empty() || m_dDilationKernel.empty() )
     {    
@@ -243,7 +243,7 @@ int ParticleFinder::doDSPAndFindParticlesInImg(int ixSlice, GpuMat d_Input, bool
     // Cast to uchar, store as particle image (values are still 0 or 1, so no scale needed)
     m_dLocalMaxImg.convertTo( m_dParticleImg, CV_8U );
 
-    return m_Solver.FindParticlesInImage( ixSlice, d_Input, m_dFilteredImg, m_dThreshImg, m_dParticleImg, bLinkParticles, pFoundParticles );
+    return m_Solver.FindParticlesInImage(stackNum, ixSlice, d_Input, m_dFilteredImg, m_dThreshImg, m_dParticleImg, bLinkParticles, pFoundParticles );
 }
 
 // Returns empty if being launched asynchronously
@@ -282,15 +282,16 @@ std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute (bool linkPar
         for (size_t i = 0; i < m_vdInputImages.size (); i++)
         {
             int width = m_vdInputImages[0].cols;
-            doDSPAndFindParticlesInImg ((int)i, m_vdInputImages[i], linkParticles, pParticlesInImg);
+            doDSPAndFindParticlesInImg (m_mapImageToStackFrame[i].first , (int)i, m_vdInputImages[i], linkParticles, pParticlesInImg);
 
             if (outputFile.is_open())
             {
-                std::sort (particlesInImg.begin (), particlesInImg.end (), [width](
-                    const FoundParticle& a, const FoundParticle& b)
-                    {
-                        return (a.fPosX + a.fPosY * width) < (b.fPosX + b.fPosY * width);
-                    });
+                //std::sort (particlesInImg.begin (), particlesInImg.end (), [width, pixelToGridIdx](
+                //    const FoundParticle& a, const FoundParticle& b)
+                //    {
+                //        return pixelToGridIdx (a.fPosX, a.fIntensity, width, 3) < pixelToGridIdx (b.fPosX, b.fIntensity, width, 3);
+                //        // return (a.fPosX /*+ a.fPosY * width*/) < (b.fPosX /*+ b.fPosY * width*/);
+                //    });
 
                 for (int p = 0; p < particlesInImg.size (); p++)
                 {
@@ -300,6 +301,22 @@ std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute (bool linkPar
                     outputFile << particlesInImg[p].fPosY << '\t';
                     outputFile << particlesInImg[p].fIntensity << '\t';
                     outputFile << sqrt (particlesInImg[p].fR2) << std::endl;
+                }
+            }
+        }
+
+        if (linkParticles)
+        {
+            std::string particlePosFileName = "phi41pct_3D_6zoom_xyzt.txt";
+            std::ofstream particlePosFile (particlePosFileName, std::ios::out);
+            for (auto& it : m_Solver.LinkFoundParticles ())
+            {
+                for (auto& particle : it.second)
+                {
+                    particlePosFile << it.first << '\t';
+                    particlePosFile << particle.fPosX << '\t';
+                    particlePosFile << particle.fPosY << '\t';
+                    particlePosFile << particle.fPosZ << std::endl;
                 }
             }
         }

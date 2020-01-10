@@ -46,8 +46,9 @@ private:
         ~Solver();
 
         // Find particles in a given image, return the count of particles found
-        int FindParticlesInImage(int nSliceIdx, GpuMat d_Input, GpuMat d_FilteredImage, GpuMat d_ThreshImg, GpuMat d_ParticleImg,
+        int FindParticlesInImage(int stackNum, int nSliceIdx, GpuMat d_Input, GpuMat d_FilteredImage, GpuMat d_ThreshImg, GpuMat d_ParticleImg,
             bool bLinkParticles = true, std::vector<FoundParticle> * pParticlesInImg = nullptr );
+        std::map<int, std::vector<FoundParticle>> LinkFoundParticles ();
 
         // Get all found particles
         std::vector<FoundParticle> GetFoundParticles() const;
@@ -103,7 +104,7 @@ private:
     // This actual detects particles in the input image
     // the result is a contiguous black and white
     // image that can be used in particle detection
-    int doDSPAndFindParticlesInImg( int ixSlice, GpuMat d_Input, bool bLinkParticles = true, std::vector<FoundParticle> * pFoundParticles = nullptr, bool bResetKernels = false );
+    int doDSPAndFindParticlesInImg( int stackNum, int ixSlice, GpuMat d_Input, bool bLinkParticles = true, std::vector<FoundParticle> * pFoundParticles = nullptr, bool bResetKernels = false );
 
     void getUserInput( GpuMat d_Input );
     
