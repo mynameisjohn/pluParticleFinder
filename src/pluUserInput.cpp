@@ -89,10 +89,10 @@ void ParticleFinder::getUserInput (GpuMat d_Input)
         std::function<void (int, void*)> trackBarCallback = [&](int pos, void* priv)
         {
             // Assign DSP params
-            m_nGaussFiltRadius = mapParamValues[gaussRadiusTBName] / trackBarResolution;
-            m_fHWHM = mapParamValues[hwhmTBName] / trackBarResolution;
-            m_nDilationRadius = mapParamValues[dilationRadiusTBName] / trackBarResolution;
-            m_fParticleThreshold = mapParamValues[particleThreshTBName] / trackBarResolution;
+            _gaussFiltRadius = mapParamValues[gaussRadiusTBName] / trackBarResolution;
+            _HWHM = mapParamValues[hwhmTBName] / trackBarResolution;
+            _dilationRadius = mapParamValues[dilationRadiusTBName] / trackBarResolution;
+            _particleThreshold = mapParamValues[particleThreshTBName] / trackBarResolution;
 
             // TODO prevent bad values from existing
 
@@ -100,7 +100,7 @@ void ParticleFinder::getUserInput (GpuMat d_Input)
 
             // do DSP, get particles
             std::vector<FoundParticle> vParticlesInImg;
-            doDSPAndFindParticlesInImg (0, 0, d_Input, false, &vParticlesInImg, true);
+            doDSPAndFindParticlesInImg (0, 0, d_Input, &vParticlesInImg, true);
 
             // Draw circles in local max image
             if (!vParticlesInImg.empty ())
@@ -139,8 +139,8 @@ void ParticleFinder::getUserInput (GpuMat d_Input)
 
             // Copy all images to display image in correct place
             makeDisplayImage (d_Input).copyTo (displayMat (topLeft));
-            makeDisplayImage (m_dFilteredImg).copyTo (displayMat (topRight));
-            makeDisplayImage (m_dDilatedImg).copyTo (displayMat (bottomLeft));
+            makeDisplayImage (_filteredImg).copyTo (displayMat (topRight));
+            makeDisplayImage (_dilatedImg).copyTo (displayMat (bottomLeft));
             makeDisplayImage (d_InputCirc).copyTo (displayMat (bottomRight));
 
             // Show new image

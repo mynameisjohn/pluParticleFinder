@@ -11,19 +11,14 @@
 // Particle Finder class
 // Does all DSP, delegates
 // particle position solving / linking
-// to the Solver member
 class ParticleFinder
 {
+public:
     // Useful typedef
     using GpuMat = cv::cuda::GpuMat;
 
-    // Solver class - looks at particle in successive images and
-    //    1) determines particle locations in the current slices 
-    //    2) uses the locations to track particles across multiple slices
-    //    3) determines particle "centers" (located at slice with max intensity)
-    //    4) discards invalid particles
-    // Implemented in .cu/cuh files because it runs some thrust/CUDA code
-public:
+    // FoundParticle struct
+    // Represents particle 3D position, intensity, and radius
     struct FoundParticle
     {
         float fPosX;
@@ -33,82 +28,98 @@ public:
         float fR2;
     };
 
-private:
+    // Solver class
+    // Find particles in 2D images and optionally links 
+    // particles in 3D across several images. 
+    // Implemented in .cu/cuh files because it runs some thrust/CUDA code
     class Solver
     {
+        // we have a separate impl class performing the thrust/CUDA code
         struct impl;
-        std::unique_ptr<Solver::impl> m_upSolverImpl;
+        std::unique_ptr<Solver::impl> _solverImpl;
+
     public:
-        // Initializes DSP params to default testbed params
         Solver();
+        ~Solver ();
 
-        // Destructor must be implemented... for impl
-        ~Solver();
-
-        // Find particles in a given image, return the count of particles found
-        int FindParticlesInImage(int stackNum, int nSliceIdx, GpuMat d_Input, GpuMat d_FilteredImage, GpuMat d_ThreshImg, GpuMat d_ParticleImg,
-            bool bLinkParticles = true, std::vector<FoundParticle> * pParticlesInImg = nullptr );
-        std::map<int, std::vector<FoundParticle>> LinkFoundParticles ();
-
-        // Get all found particles
-        std::vector<FoundParticle> GetFoundParticles() const;
-
-        std::vector<FoundParticle> GetFoundParticlesInSlice(int ixSlice) const;
-
+        // Initializes kernels and internal data structures
+        // (after params have been set)
         void Init();
 
-        // Reset current count of found particles
-        void Reset();
+        // Resets the linking state
+        void ResetLinking();
+        
+        // Find 2D particles in a given image, return the count of particles found
+        // (optionally assign particlesInImg to get all particles in this image)
+        int FindParticlesInImage(int stackNum, 
+                                 int sliceIdx,
+                                 GpuMat input, 
+                                 GpuMat filteredImage, 
+                                 GpuMat threshImg, 
+                                 GpuMat particleImg,
+                                 std::vector<FoundParticle> * particlesInImg = nullptr );
+
+        // Link 2D particle positions across slices, computing 3D particle positions
+        // as well as their radius / intensity. 
+        // Returns a map of stack index to found particle
+        std::map<int, std::vector<FoundParticle>> LinkFoundParticles ();
 
         // Getters and setters for the solver params (implementd by solver::impl)
-        int GetMaskRadius() const;        // The radius of our particle mask kernels
-        int GetFeatureRadius() const;    // The radius within the image we'd like to consier
-        int GetMinSliceCount() const;    // The minimum # of slices we require to contribute to a particle
-        int GetMaxSliceCount() const;    // The maximum # of slices we allow to contribute to a particle
-        float GetNeighborRadius() const;    // The radius in which we search for new particles
-        int GetMaxLevel() const;        // The subdivision level we use to spatially partition previous particles
+
+        // 2D particle finding parameters
+        int GetMaskRadius() const;
         void SetMaskRadius( int mR );
+        int GetFeatureRadius() const;
         void SetFeatureRadius( int fR );
-        void SetMinSliceCount( int nMinSC );
+        
+        // 3D linking params
+        int GetMinSliceCount() const;
+        void SetMinSliceCount( int nMinSC );        
+        int GetMaxSliceCount() const;
         void SetMaxSliceCount( int nMaxSC );
+        float GetNeighborRadius() const;
         void SetNeighborRadius( float nR );
-        void SetMaxLevel( int mL );
-    } m_Solver;
+        void SetXYFactor (float xyFactor);
+        float GetXYFactor () const;
+        void SetZFactor (float zFactor);
+        float GetZFactor () const;
+    } _solver;
 
     ///////////////////////////////////////////////////////////////////
 
-    std::vector<GpuMat> m_vdInputImages;    // Buffer used for input
-    std::map<int, std::pair<int, int>> m_mapImageToStackFrame; // used to map input images to stacks / frams
+    std::vector<GpuMat> _inputImages;    // Buffer used for input
+    std::map<int, std::pair<int, int>> _imageToStackFrame; // used to map input images to stacks / frams
 
     // Internal buffers - these are of the same
     // dimensions, but may be different data types
-    GpuMat m_dFilteredImg;    // Post Gaussian Bandpass
-    GpuMat m_dDilatedImg;    // Post dilation
-    GpuMat m_dLocalMaxImg;    // Local Max image
-    GpuMat m_dParticleImg;    // Particle Image
-    GpuMat m_dThreshImg;    // Thresholded Particle image
-    GpuMat m_dTmpImg;        // Temporary image
+    GpuMat _filteredImg;    // Post Gaussian Bandpass
+    GpuMat _dilatedImg;    // Post dilation
+    GpuMat _localMaxImg;    // Local Max image
+    GpuMat _particleImg;    // Particle Image
+    GpuMat _threshImg;    // Thresholded Particle image
+    GpuMat _scratchImg;        // Scrach buffer image
 
-    cv::Ptr<cv::cuda::Filter> m_dGaussFilter;        // Gaussian Filter
-    cv::Ptr<cv::cuda::Filter> m_dCircleFilter;        // Circle Filter
-    cv::Ptr<cv::cuda::Filter> m_dDilationKernel;    // Dilation Filter
+    cv::Ptr<cv::cuda::Filter> _gaussFilter;        // Gaussian Filter
+    cv::Ptr<cv::cuda::Filter> _circleFilter;        // Circle Filter
+    cv::Ptr<cv::cuda::Filter> _dilationKernel;    // Dilation Filter
 
     ///////////////////////////////////////////////////////////////////
     // DSP parameters
     // These are the default testbed params
-    int m_nGaussFiltRadius{ 6 };         // Radius of Gaussian (low-pass) Filter
-    int m_nDilationRadius{ 3 };          // Radius of dilation operation
-    float m_fHWHM{ 4.f };                // Half-Width at Half Maximum (describes gaussian kernel)
-    float m_fParticleThreshold{ 5.f };   // Threshold intensity for particles in image
+    int _gaussFiltRadius{ 6 };         // Radius of Gaussian (low-pass) Filter
+    int _dilationRadius{ 3 };          // Radius of dilation operation
+    float _HWHM{ 4.f };                // Half-Width at Half Maximum (describes gaussian kernel)
+    float _particleThreshold{ 5.f };   // Threshold intensity for particles in image
 
     // This actual detects particles in the input image
     // the result is a contiguous black and white
     // image that can be used in particle detection
-    int doDSPAndFindParticlesInImg( int stackNum, int ixSlice, GpuMat d_Input, bool bLinkParticles = true, std::vector<FoundParticle> * pFoundParticles = nullptr, bool bResetKernels = false );
+    int doDSPAndFindParticlesInImg( int stackNum, int ixSlice, GpuMat d_Input, std::vector<FoundParticle> * pFoundParticles = nullptr, bool bResetKernels = false );
 
     void getUserInput( GpuMat d_Input );
     
-    std::string m_strOutputFile2D;
+    std::string _outputFile2D;
+    std::string _outputFileXYZT;
 
 public:
     // Initializes DSP params to default testbed params
@@ -116,26 +127,28 @@ public:
     ~ParticleFinder () { cancelTask (); }
 
     // Simple getter for solver to make it accessible
-    Solver * GetSolver() { return &m_Solver; }
+    Solver * GetSolver() { return &_solver; }
 
     // The other way is to use these setters
-    inline void SetGaussianRadius (int nGaussianRadius) { m_nGaussFiltRadius = nGaussianRadius; }
-    inline void SetDilationRadius (int nDilationRadius) { m_nDilationRadius = nDilationRadius; }
-    inline void SetFWHM (int fHWHM) { m_fHWHM = fHWHM; }
-    inline void SetParticleThreshold (int fParticleThreshold) { m_fParticleThreshold = fParticleThreshold; }
+    inline void SetGaussianRadius (int nGaussianRadius) { _gaussFiltRadius = nGaussianRadius; }
+    inline void SetDilationRadius (int nDilationRadius) { _dilationRadius = nDilationRadius; }
+    inline void SetFWHM (int fHWHM) { _HWHM = fHWHM; }
+    inline void SetParticleThreshold (int fParticleThreshold) { _particleThreshold = fParticleThreshold; }
 
-    inline int GetGaussianRadius () const { return m_nGaussFiltRadius; }
-    inline int GetDilationRadius () const { return m_nGaussFiltRadius; }
-    inline float GetFWHM () const { return m_fHWHM; }
-    inline float GetParticleThreshold () const { return m_fParticleThreshold; }
+    inline int GetGaussianRadius () const { return _gaussFiltRadius; }
+    inline int GetDilationRadius () const { return _gaussFiltRadius; }
+    inline float GetFWHM () const { return _HWHM; }
+    inline float GetParticleThreshold () const { return _particleThreshold; }
 
-    void Set2DOutputFile (std::string outputFile2D) { m_strOutputFile2D = outputFile2D; }
+    void SetOutputFile2D (std::string outputFile2D) { _outputFile2D = outputFile2D; }
+    void SetOutputFileXYZT (std::string outputFileXYZT) { _outputFileXYZT = outputFileXYZT; }
 
     bool Initialize(std::list<std::string> liStackPaths, int nStartOfStack, int nEndOfStack, bool bDoUserInput = false);
 
-    size_t GetNumImages () const { return m_vdInputImages.size (); }
-    cv::Size GetImageDimensions () { return m_vdInputImages.empty () ? cv::Size() : m_vdInputImages.front ().size (); }
+    size_t GetNumImages () const { return _inputImages.size (); }
+    cv::Size GetImageDimensions () { return _inputImages.empty () ? cv::Size() : _inputImages.front ().size (); }
 
+    //! \todo What's the plan for these async tasks?
     struct AsyncParticleFindingTask {
         std::mutex muData;
         bool bCancel;
@@ -151,7 +164,6 @@ public:
         int nMinSliceCount;
         int nMaxSliceCount;
         int nNeighborRadius;
-        int nMaxLevel;
         std::map<int, std::vector<FoundParticle>> mapFoundSliceToParticles;
     };
     std::vector<FoundParticle> Execute(bool linkParticles, std::shared_ptr<AsyncParticleFindingTask> upParticleFindingTask = nullptr);

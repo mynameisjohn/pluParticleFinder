@@ -40,14 +40,23 @@ int main( int argc, char ** argv )
                 inputFiles.push_back (inputFileEl.child_value ());
 
         auto cfParams = params.child ("centerfind_params");
-
         P.SetGaussianRadius (cfParams.attribute ("filter_radius").as_int ());
         P.SetDilationRadius (cfParams.attribute ("dilation_radius").as_int ());
         P.SetFWHM (cfParams.attribute ("HWHM").as_float ());
         P.SetParticleThreshold (cfParams.attribute ("particle_threshold").as_float ());
 
-        P.GetSolver ()->SetFeatureRadius (cfParams.attribute ("feature_radius").as_int ());
-        P.GetSolver ()->SetMaskRadius (cfParams.attribute ("mask_radius").as_int ());
+        if (linkParticles)
+        {
+            auto linkParams = params.child ("link_params");
+            P.SetOutputFileXYZT (linkParams.attribute ("outputfile_XYZT").as_string ());
+            P.GetSolver ()->SetFeatureRadius (linkParams.attribute ("feature_radius").as_int ());
+            P.GetSolver ()->SetMaskRadius (linkParams.attribute ("mask_radius").as_int ());
+            P.GetSolver ()->SetNeighborRadius (linkParams.attribute ("neighbor_radius").as_int ());
+            P.GetSolver ()->SetMinSliceCount (linkParams.attribute ("min_slices").as_int ());
+            P.GetSolver ()->SetMaxSliceCount (linkParams.attribute ("max_slices").as_int ());
+            P.GetSolver ()->SetXYFactor (linkParams.attribute ("xy_factor").as_float ());
+            P.GetSolver ()->SetZFactor (linkParams.attribute ("z_factor").as_float ());
+        }
     }
     else if (argc == 6)
     {
@@ -55,9 +64,9 @@ int main( int argc, char ** argv )
         outputFile2D = argv[2];
         startOfStack = std::atoi (argv[3]);
         endOfStack = std::atoi (argv[4]);
-        int frameCount = std::atoi (argv[5]);
+        int stackCount = std::atoi (argv[5]);
 
-        for (int i = 0; i < frameCount; i++)
+        for (int i = 0; i < stackCount; i++)
         {
             std::stringstream stacknumber_stream;
             stacknumber_stream.setf (std::ios::right, std::ios::adjustfield);
@@ -76,7 +85,7 @@ int main( int argc, char ** argv )
 
     P.Initialize (inputFiles, startOfStack, endOfStack, getUserInput);
     
-    P.Set2DOutputFile (outputFile2D);
+    P.SetOutputFile2D (outputFile2D);
 
     P.Execute (linkParticles);
 
