@@ -69,6 +69,11 @@ void ParticleFinder::Solver::impl::Init ()
     h_RY.copyTo (m_dRadYKernel);
     h_R2.copyTo (m_dRadSqKernel);
 #endif
+
+    _circleKernelPtr = Floatptr((float*) _circleMask.data);
+    _radXKernelPtr = Floatptr ((float*) _radXKernel.data);
+    _radYKernelPtr = Floatptr ((float*) _radYKernel.data);
+    _radSqKernelPtr = Floatptr ((float*) _radSqKernel.data);
 }
 
 int ParticleFinder::Solver::impl::FindParticlesInImage (int stackNum, int nSliceIdx, GpuMat d_Input, GpuMat d_FilteredImage, GpuMat d_ThreshImg, GpuMat d_ParticleImg, std::vector<FoundParticle>* pParticlesInImg)
@@ -96,12 +101,6 @@ int ParticleFinder::Solver::impl::FindParticlesInImage (int stackNum, int nSlice
 
     const int N = d_Input.rows;
 
-    // Get pointers to our kernels (can we cache these + other operators?)
-    Floatptr d_pCirleKernel ((float*)_circleMask.data);
-    Floatptr d_pRxKernel ((float*)_radXKernel.data);
-    Floatptr d_pRyKernel ((float*)_radYKernel.data);
-    Floatptr d_pR2Kernel ((float*)_radSqKernel.data);
-
     // For each pixel in the particle image, we care if it's nonzero and if it's far enough from the edges
     // So we need its index (transformable into twoD pos) and its value, which we zip
     auto itDetectParticleBegin = thrust::make_zip_iterator (thrust::make_tuple (d_ParticleImgVec.begin (), thrust::counting_iterator<int> (0)));
@@ -117,9 +116,9 @@ int ParticleFinder::Solver::impl::FindParticlesInImage (int stackNum, int nSlice
     ParticleVec d_NewParticleVec (newParticleCount);
     thrust::transform (d_NewParticleIndicesVec.begin (), d_NewParticleIndicesVec.begin () + newParticleCount, d_NewParticleVec.begin (),
 #if SOLVER_DEVICE
-        MakeParticleFromIdx (stackNum, nSliceIdx, N, _maskRadius, d_pThreshImgBuf.get (), d_pCirleKernel.get (), d_pRxKernel.get (), d_pRyKernel.get (), d_pR2Kernel.get ()));
+        MakeParticleFromIdx (stackNum, nSliceIdx, N, _maskRadius, d_pThreshImgBuf.get (), _circleKernelPtr.get (), _radXKernelPtr.get (), _radYKernelPtr.get (), _radSqKernelPtr.get ()));
 #else
-        MakeParticleFromIdx (stackNum, nSliceIdx, N, m_uMaskRadius, d_pThreshImgBuf, d_pCirleKernel, d_pRxKernel, d_pRyKernel, d_pR2Kernel));
+        MakeParticleFromIdx (stackNum, nSliceIdx, N, m_uMaskRadius, d_pThreshImgBuf, _circleKernelPtr, _radXKernelPtr, _radYKernelPtr, _radSqKernelPtr));
 #endif
 
     // Store new particles if requested

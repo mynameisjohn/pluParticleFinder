@@ -81,6 +81,11 @@ struct ParticleFinder::Solver::impl
     Img _radYKernel;                   // The y circle mask, used to calculate an offset to the y coordinate
     Img _radSqKernel;                  // The r2 circle mask, used to calculate particle radius
 
+    Floatptr _circleKernelPtr;
+    Floatptr _radXKernelPtr;
+    Floatptr _radYKernelPtr;
+    Floatptr _radSqKernelPtr;
+
     // used to map slices to found particles
     std::map<int, std::list<ParticleVec>> _stackToParticles;
 };
