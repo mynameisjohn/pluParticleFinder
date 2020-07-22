@@ -204,7 +204,7 @@ int ParticleFinder::doDSPAndFindParticlesInImg(int stackNum, int ixSlice, GpuMat
     std::cout << "Finding particles in slice " << ixSlice << std::endl;
 #endif
 
-    RemapImage (d_Input, 0, 100);
+    cv::cuda::normalize (d_Input, d_Input, 0, 100, cv::NORM_MINMAX, -1);
     
     // Apply low/high pass filters (gaussian and circle kernels, resp.)
     _gaussFilter->apply( d_Input, _filteredImg );
@@ -225,7 +225,7 @@ int ParticleFinder::doDSPAndFindParticlesInImg(int stackNum, int ixSlice, GpuMat
 
     // Remap this from 0 to 100, so we have a normalized
     // range of particle intenstiy thresholds
-    RemapImage( _filteredImg, 0, 100 );
+    cv::cuda::normalize (_filteredImg, _filteredImg, 0, 100, cv::NORM_MINMAX, -1);
 
     // Reset thresh to base value
     _threshImg.setTo( cv::Scalar( _particleThreshold ) );
