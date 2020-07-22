@@ -7,9 +7,9 @@ ParticleFinder::Solver::Solver():
 
 ParticleFinder::Solver::~Solver () {}
 
-void ParticleFinder::Solver::Init ()
+void ParticleFinder::Solver::Init (int N)
 {
-    return _solverImpl->Init ();
+    return _solverImpl->Init (N);
 }
 
 void ParticleFinder::Solver::ResetLinking ()

@@ -23,7 +23,7 @@ ParticleFinder::Solver::impl::impl () :
     _zFactor (0.2938f)
 {}
 
-void ParticleFinder::Solver::impl::Init ()
+void ParticleFinder::Solver::impl::Init (int N)
 {
     // Neighbor region diameter
     int diameter = 2 * _maskRadius + 1;
@@ -74,6 +74,8 @@ void ParticleFinder::Solver::impl::Init ()
     _radXKernelPtr = Floatptr ((float*) _radXKernel.data);
     _radYKernelPtr = Floatptr ((float*) _radYKernel.data);
     _radSqKernelPtr = Floatptr ((float*) _radSqKernel.data);
+
+    _newIndicesVec = IntVec (N * N);
 }
 
 int ParticleFinder::Solver::impl::FindParticlesInImage (int stackNum, int nSliceIdx, GpuMat d_Input, GpuMat d_FilteredImage, GpuMat d_ThreshImg, GpuMat d_ParticleImg, std::vector<FoundParticle>* pParticlesInImg)
@@ -107,14 +109,14 @@ int ParticleFinder::Solver::impl::FindParticlesInImage (int stackNum, int nSlice
     auto itDetectParticleEnd = thrust::make_zip_iterator (thrust::make_tuple (d_ParticleImgVec.end (), thrust::counting_iterator<int> (N * N)));
 
     // Then, if the particle fits our criteria, we copy its index (from the counting iterator) into this vector, and discard the uchar
-    IntVec d_NewParticleIndicesVec (N * N);
-    auto itFirstNewParticle = thrust::make_zip_iterator (thrust::make_tuple (thrust::discard_iterator<> (), d_NewParticleIndicesVec.begin ()));
+    auto itFirstNewParticle = thrust::make_zip_iterator (thrust::make_tuple (thrust::discard_iterator<> (), _newIndicesVec.begin ()));
     auto itLastNewParticle = thrust::copy_if (itDetectParticleBegin, itDetectParticleEnd, itFirstNewParticle, IsParticleAtIdx (N, _featureRadius));
     size_t newParticleCount = itLastNewParticle - itFirstNewParticle;
 
     // Now transform each index into a particle by looking at the source image data surrounding the particle
-    ParticleVec d_NewParticleVec (newParticleCount);
-    thrust::transform (d_NewParticleIndicesVec.begin (), d_NewParticleIndicesVec.begin () + newParticleCount, d_NewParticleVec.begin (),
+    _newParticlesVec.resize (newParticleCount);
+
+    thrust::transform (_newIndicesVec.begin (), _newIndicesVec.begin () + newParticleCount, _newParticlesVec.begin (),
 #if SOLVER_DEVICE
         MakeParticleFromIdx (stackNum, nSliceIdx, N, _maskRadius, d_pThreshImgBuf.get (), _circleKernelPtr.get (), _radXKernelPtr.get (), _radYKernelPtr.get (), _radSqKernelPtr.get ()));
 #else
@@ -131,14 +133,14 @@ int ParticleFinder::Solver::impl::FindParticlesInImage (int stackNum, int nSlice
 
         // We consider a particle "found" if it's intensity state is severed
         // Transform all found particles that meet the IsFoundParticle criterion into FoundParticles
-        auto itFoundParticleEnd = thrust::transform (d_NewParticleVec.begin (), d_NewParticleVec.end (), d_vRet.begin (), Particle2FoundParticle ());
+        auto itFoundParticleEnd = thrust::transform (_newParticlesVec.begin (), _newParticlesVec.end (), d_vRet.begin (), Particle2FoundParticle ());
         auto nParticles = itFoundParticleEnd - d_vRet.begin ();
 
         // Download to host
         thrust::copy (d_vRet.begin (), d_vRet.end (), pParticlesInImg->begin ());
     }
 
-    _stackToParticles[stackNum].emplace_back (std::move (d_NewParticleVec));
+    _stackToParticles[stackNum].emplace_back (std::move (_newParticlesVec));
     return newParticleCount;
 }
 

@@ -44,7 +44,7 @@ public:
 
         // Initializes kernels and internal data structures
         // (after params have been set)
-        void Init();
+        void Init (int N);
 
         // Resets the linking state
         void ResetLinking();

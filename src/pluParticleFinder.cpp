@@ -98,7 +98,15 @@ bool ParticleFinder::Initialize(std::list<std::string> liStackPaths, int nStartO
 
     if (!_inputImages.empty()) 
     {
-        _solver.Init ();
+        if (!_inputImages.front ().rows == _inputImages.front ().cols)
+        {
+#if DEBUG
+            std::cout << "Image dimensions must be equal" << std::endl;
+#endif
+            return false;
+        }
+
+        _solver.Init (_inputImages.front ().rows);
 
         if (bDoUserInput)
             getUserInput (_inputImages.front ());
@@ -116,6 +124,9 @@ std::vector<ParticleFinder::FoundParticle>  ParticleFinder::launchTask (std::sha
     m_spParticleFindingTask = spParticleFindingTask;
     m_fuParticleFindingTask = std::async (std::launch::async, [this, spParticleFindingTask]()
         {
+            if (_inputImages.empty ())
+                return;
+
             // Set DSP params
             SetGaussianRadius (m_spParticleFindingTask->nGaussianRadius);
             SetFWHM (m_spParticleFindingTask->fHWHM);
@@ -126,7 +137,7 @@ std::vector<ParticleFinder::FoundParticle>  ParticleFinder::launchTask (std::sha
             GetSolver ()->SetMinSliceCount (m_spParticleFindingTask->nMinSliceCount);
             GetSolver ()->SetMaxSliceCount (m_spParticleFindingTask->nMaxSliceCount);
             GetSolver ()->SetNeighborRadius (m_spParticleFindingTask->nNeighborRadius);
-            GetSolver ()->Init ();
+            GetSolver ()->Init (_inputImages.front ().rows);
 
             // Make sure this is empty
             m_spParticleFindingTask->mapFoundSliceToParticles.clear ();
