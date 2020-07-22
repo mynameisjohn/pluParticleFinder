@@ -9,7 +9,9 @@ bool ParticleFinder::Initialize(std::list<std::string> liStackPaths, int nStartO
 {
     // For each tiff stack
     int nSlices(0);
+#if DEBUG
     std::cout << "Starting to load slices..." << std::endl;
+#endif
 
     // Load the images - this could be done
     // concurrently to the CenterFind DSP
@@ -20,10 +22,14 @@ bool ParticleFinder::Initialize(std::list<std::string> liStackPaths, int nStartO
         FIMULTIBITMAP * FI_Input = FreeImage_OpenMultiBitmap(FIF_TIFF, strStackPath.c_str(), 0, 1, 1, TIFF_DEFAULT);
         if (FI_Input == nullptr)
         {
+#if DEBUG
             std::cout << "Error loading stack " << strStackPath << std::endl;
             continue;
+#endif
         }
+#if DEBUG
         std::cout << "Loading stack " << strStackPath << std::endl;
+#endif
 
         // Read in images, create data
 
@@ -73,12 +79,16 @@ bool ParticleFinder::Initialize(std::list<std::string> liStackPaths, int nStartO
             }
             else
             {
+#if DEBUG
                 std::cout << "Error loading slice " << ixSlice << " of stack " << strStackPath << std::endl;
+#endif
             }
 
+#if DEBUG
             // Print something out every 10 slices
             if (ixSlice % 10 == 0)
                 std::cout << "On image " << ixSlice << " of stack " << strStackPath << "..." << std::endl;
+#endif
         }
 
         // Close multibitmap
@@ -165,8 +175,10 @@ std::vector<ParticleFinder::FoundParticle>  ParticleFinder::launchTask (std::sha
 int ParticleFinder::doDSPAndFindParticlesInImg(int stackNum, int ixSlice, GpuMat d_Input, std::vector<FoundParticle> * pFoundParticles /*= nullptr*/, bool bResetKernels /*= false*/)
 {
     if ( bResetKernels || _circleFilter.empty() || _dilationKernel.empty() )
-    {    
+    {
+#if DEBUG
         std::cout << "Constructing DSP kernels" << std::endl;
+#endif
 
         int nBPDiameter = 2 * _gaussFiltRadius + 1;
         const cv::Size bpFilterSize (nBPDiameter, nBPDiameter);
