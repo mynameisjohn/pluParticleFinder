@@ -121,15 +121,14 @@ int ParticleFinder::Solver::impl::FindParticlesInImage (int stackNum, int nSlice
 #else
         MakeParticleFromIdx (stackNum, nSliceIdx, N, m_uMaskRadius, d_pThreshImgBuf, d_pCirleKernel, d_pRxKernel, d_pRyKernel, d_pR2Kernel));
 #endif
-    size_t numParticlesFound = d_NewParticleVec.size ();
 
     // Store new particles if requested
     if (pParticlesInImg)
     {
         // Convert all found particles to the foundparticle type
         // Reserve enough space for all previously found, though the actual may be less
-        FoundParticleVec d_vRet (numParticlesFound);
-        pParticlesInImg->resize (numParticlesFound); // (needed?)
+        FoundParticleVec d_vRet (newParticleCount);
+        pParticlesInImg->resize (newParticleCount); // (needed?)
 
         // We consider a particle "found" if it's intensity state is severed
         // Transform all found particles that meet the IsFoundParticle criterion into FoundParticles
@@ -141,7 +140,7 @@ int ParticleFinder::Solver::impl::FindParticlesInImage (int stackNum, int nSlice
     }
 
     _stackToParticles[stackNum].emplace_back (std::move (d_NewParticleVec));
-    return numParticlesFound;
+    return newParticleCount;
 }
 
 std::map<int, std::vector<ParticleFinder::FoundParticle>> ParticleFinder::Solver::impl::LinkFoundParticles ()
