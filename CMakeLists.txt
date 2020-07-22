@@ -22,7 +22,7 @@ ELSEIF (CMAKE_BUILD_TYPE MATCHES Release)
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -O2")
   ENDIF(UNIX)
   # I think this flag is cross platform
-  SET(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS}; -O2")
+  SET(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS}; -Xptxas -O3")
 ENDIF (CMAKE_BUILD_TYPE MATCHES Debug)
 
 SET(SOLVER_DEVICE 1 CACHE BOOL "Run the particle solver on the device")
