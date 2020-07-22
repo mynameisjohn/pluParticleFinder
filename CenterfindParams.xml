@@ -4,9 +4,9 @@
   link_particles="T">
 
   <input stack_start="1" stack_end="141">
-    <file>phi41pct_3D_6zoom_0001.tif</file>
-    <file>phi41pct_3D_6zoom_0002.tif</file>
-    <file>phi41pct_3D_6zoom_0003.tif</file>
+    <file>../phi41pct_3D_6zoom_0001.tif</file>
+    <file>../phi41pct_3D_6zoom_0002.tif</file>
+    <file>../phi41pct_3D_6zoom_0003.tif</file>
   </input>
 
   <centerfind_params
