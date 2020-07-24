@@ -61,8 +61,8 @@ struct ParticleFinder::Solver::impl
     impl ();
 
     // implementations of Solver functions
-    void Init (int pixelCount);
-    int FindParticlesInImage (int stackNum, int nSliceIdx, GpuMat d_Input, GpuMat d_FilteredImage, GpuMat d_ThreshImg, GpuMat d_ParticleImg, std::vector<FoundParticle>* pParticlesInImg);
+    void Init (int N, int threadCount);
+    int FindParticlesInImage (int thraedNum, int stackNum, int sliceIdx, GpuMat d_Input, GpuMat d_FilteredImage, GpuMat d_ThreshImg, GpuMat d_ParticleImg, std::vector<FoundParticle>* pParticlesInImg);
     std::map<int, std::vector<FoundParticle>> LinkFoundParticles ();
 
     // Particle Finding params
@@ -86,9 +86,8 @@ struct ParticleFinder::Solver::impl
     Floatptr _radYKernelPtr;
     Floatptr _radSqKernelPtr;
 
-    IntVec _newIndicesVec;
-    ParticleVec _newParticlesVec;
+    std::vector<IntVec> _newIndicesVec;
 
     // used to map slices to found particles
-    std::map<int, std::list<ParticleVec>> _stackToParticles;
+    std::vector<std::map<int, std::map<int, ParticleVec>>> _stackToParticles;
 };

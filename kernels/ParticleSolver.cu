@@ -23,7 +23,7 @@ ParticleFinder::Solver::impl::impl () :
     _zFactor (0.2938f)
 {}
 
-void ParticleFinder::Solver::impl::Init (int N)
+void ParticleFinder::Solver::impl::Init (int N, int threadCount)
 {
     // Neighbor region diameter
     int diameter = 2 * _maskRadius + 1;
@@ -75,10 +75,14 @@ void ParticleFinder::Solver::impl::Init (int N)
     _radYKernelPtr = Floatptr ((float*) _radYKernel.data);
     _radSqKernelPtr = Floatptr ((float*) _radSqKernel.data);
 
-    _newIndicesVec = IntVec (N * N);
+    for (int i = 0; i < threadCount; i++)
+    {
+        _newIndicesVec.emplace_back (N * N);
+        _stackToParticles.emplace_back ();
+    }
 }
 
-int ParticleFinder::Solver::impl::FindParticlesInImage (int stackNum, int nSliceIdx, GpuMat d_Input, GpuMat d_FilteredImage, GpuMat d_ThreshImg, GpuMat d_ParticleImg, std::vector<FoundParticle>* pParticlesInImg)
+int ParticleFinder::Solver::impl::FindParticlesInImage (int threadNum, int stackNum, int sliceIdx, GpuMat d_Input, GpuMat d_FilteredImage, GpuMat d_ThreshImg, GpuMat d_ParticleImg, std::vector<FoundParticle>* pParticlesInImg)
 {
     // Make sure we've initialized something
     if (_radSqKernel.empty ())
@@ -108,19 +112,21 @@ int ParticleFinder::Solver::impl::FindParticlesInImage (int stackNum, int nSlice
     auto itDetectParticleBegin = thrust::make_zip_iterator (thrust::make_tuple (d_ParticleImgVec.begin (), thrust::counting_iterator<int> (0)));
     auto itDetectParticleEnd = thrust::make_zip_iterator (thrust::make_tuple (d_ParticleImgVec.end (), thrust::counting_iterator<int> (N * N)));
 
+    auto& newIndicesVec = _newIndicesVec[threadNum];
+
     // Then, if the particle fits our criteria, we copy its index (from the counting iterator) into this vector, and discard the uchar
-    auto itFirstNewParticle = thrust::make_zip_iterator (thrust::make_tuple (thrust::discard_iterator<> (), _newIndicesVec.begin ()));
+    auto itFirstNewParticle = thrust::make_zip_iterator (thrust::make_tuple (thrust::discard_iterator<> (), newIndicesVec.begin ()));
     auto itLastNewParticle = thrust::copy_if (itDetectParticleBegin, itDetectParticleEnd, itFirstNewParticle, IsParticleAtIdx (N, _featureRadius));
     size_t newParticleCount = itLastNewParticle - itFirstNewParticle;
 
     // Now transform each index into a particle by looking at the source image data surrounding the particle
-    _newParticlesVec.resize (newParticleCount);
+    ParticleVec newParticlesVec (newParticleCount);
 
-    thrust::transform (_newIndicesVec.begin (), _newIndicesVec.begin () + newParticleCount, _newParticlesVec.begin (),
+    thrust::transform (newIndicesVec.begin (), newIndicesVec.begin () + newParticleCount, newParticlesVec.begin (),
 #if SOLVER_DEVICE
-        MakeParticleFromIdx (stackNum, nSliceIdx, N, _maskRadius, d_pThreshImgBuf.get (), _circleKernelPtr.get (), _radXKernelPtr.get (), _radYKernelPtr.get (), _radSqKernelPtr.get ()));
+        MakeParticleFromIdx (stackNum, sliceIdx, N, _maskRadius, d_pThreshImgBuf.get (), _circleKernelPtr.get (), _radXKernelPtr.get (), _radYKernelPtr.get (), _radSqKernelPtr.get ()));
 #else
-        MakeParticleFromIdx (stackNum, nSliceIdx, N, m_uMaskRadius, d_pThreshImgBuf, _circleKernelPtr, _radXKernelPtr, _radYKernelPtr, _radSqKernelPtr));
+        MakeParticleFromIdx (stackNum, sliceIdx, N, m_uMaskRadius, d_pThreshImgBuf, _circleKernelPtr, _radXKernelPtr, _radYKernelPtr, _radSqKernelPtr));
 #endif
 
     // Store new particles if requested
@@ -133,53 +139,68 @@ int ParticleFinder::Solver::impl::FindParticlesInImage (int stackNum, int nSlice
 
         // We consider a particle "found" if it's intensity state is severed
         // Transform all found particles that meet the IsFoundParticle criterion into FoundParticles
-        auto itFoundParticleEnd = thrust::transform (_newParticlesVec.begin (), _newParticlesVec.end (), d_vRet.begin (), Particle2FoundParticle ());
+        auto itFoundParticleEnd = thrust::transform (newParticlesVec.begin (), newParticlesVec.end (), d_vRet.begin (), Particle2FoundParticle ());
         auto nParticles = itFoundParticleEnd - d_vRet.begin ();
 
         // Download to host
         thrust::copy (d_vRet.begin (), d_vRet.end (), pParticlesInImg->begin ());
     }
 
-    _stackToParticles[stackNum].emplace_back (std::move (_newParticlesVec));
+    _stackToParticles[threadNum][stackNum][sliceIdx] = std::move (newParticlesVec);
     return newParticleCount;
 }
 
 std::map<int, std::vector<ParticleFinder::FoundParticle>> ParticleFinder::Solver::impl::LinkFoundParticles ()
 {
     std::map<int, std::vector<ParticleFinder::FoundParticle>> ret;
-
-    for (auto& itParticles : _stackToParticles)
+    std::map<int, std::map<int, ParticleVec>> combinedParticles;
+    for (auto& perThreadParticles : _stackToParticles)
     {
-        auto& m_vParticles = itParticles.second;
+        for (auto& stackToSlices : perThreadParticles)
+        {
+            for (auto it = stackToSlices.second.begin (); it != stackToSlices.second.end (); )
+            {
+                combinedParticles[stackToSlices.first][it->first] = std::move (it->second);
+                it = stackToSlices.second.erase (it);
+            }
+        }
+    }
 
-        auto itPrev = m_vParticles.begin ();
+    for (auto& itParticles : combinedParticles)
+    {
+        auto& sliceToParticles = itParticles.second;
+
+        auto itPrev = sliceToParticles.begin ();
         auto itCur = std::next (itPrev);
         float max_r2_dev = _neighborRadius * _neighborRadius;
 
         SeverParticle severParticle;
         ShouldSeverParticle shouldSeverParticle{ _minSliceCount, _maxSliceCount };
-        size_t count = thrust::count_if (itPrev->begin (), itPrev->end (), IsFoundParticle ());
+        size_t count = thrust::count_if (itPrev->second.begin (), itPrev->second.end (), IsFoundParticle ());
         int sliceIdx = 1;
-        for (; itCur != m_vParticles.end (); ++itPrev, ++itCur, sliceIdx++)
+        for (; itCur != sliceToParticles.end (); ++itPrev, ++itCur, sliceIdx++)
         {
-            int numParticlePairs = itCur->size () * itPrev->size ();
-            int numPrev = itPrev->size ();
+            auto& prevParticleVec = itPrev->second;
+            auto& curParticleVec = itCur->second;
+
+            int numParticlePairs = curParticleVec.size () * prevParticleVec.size ();
+            int numPrev = prevParticleVec.size ();
 
             auto itDetectParticleBegin = thrust::counting_iterator<int> (0);
             auto itDetectParticleEnd = itDetectParticleBegin + numParticlePairs;
 
 #if SOLVER_DEVICE
-            CheckParticleRadius checkParticleRadius{ itPrev->data ().get (), itCur->data ().get (), numPrev, max_r2_dev };
-            AttachParticle attachParticle{ itPrev->data ().get (), itCur->data ().get (), numPrev };
+            CheckParticleRadius checkParticleRadius{ prevParticleVec.data ().get (), curParticleVec.data ().get (), numPrev, max_r2_dev };
+            AttachParticle attachParticle{ prevParticleVec.data ().get (), curParticleVec.data ().get (), numPrev };
 #else
-            CheckParticleRadius checkParticleRadius{ itPrev->data (), itCur->data (), numPrev, max_r2_dev };
-            AttachParticle attachParticle{ itPrev->data (), itCur->data (), numPrev };
+            CheckParticleRadius checkParticleRadius{ prevParticleVec.data (), curParticleVec.data (), numPrev, max_r2_dev };
+            AttachParticle attachParticle{ prevParticleVec.data (), curParticleVec.data (), numPrev };
 #endif
 
             thrust::transform_if (thrust_exec, itDetectParticleBegin, itDetectParticleEnd, thrust::discard_iterator<> (), attachParticle, checkParticleRadius);
-            thrust::transform_if (itCur->begin (), itCur->end (), thrust::discard_iterator<> (), severParticle, shouldSeverParticle);
+            thrust::transform_if (curParticleVec.begin (), curParticleVec.end (), thrust::discard_iterator<> (), severParticle, shouldSeverParticle);
 
-            size_t particleInSlice = thrust::count_if (itCur->begin (), itCur->end (), IsFoundParticle ());
+            size_t particleInSlice = thrust::count_if (curParticleVec.begin (), curParticleVec.end (), IsFoundParticle ());
 
 #if DEBUG
             std::cout << particleInSlice << " particles linked in stack " << itParticles.first << ", slice " << sliceIdx << std::endl;
@@ -189,30 +210,30 @@ std::map<int, std::vector<ParticleFinder::FoundParticle>> ParticleFinder::Solver
         }
 
         // init found particles
-        for (auto& particles : m_vParticles)
-            thrust::transform_if (particles.begin (), particles.end (), thrust::discard_iterator<> (), initFoundParticles (_xyFactor), IsFoundParticle ());
+        for (auto& particles : sliceToParticles)
+            thrust::transform_if (particles.second.begin (), particles.second.end (), thrust::discard_iterator<> (), initFoundParticles (_xyFactor), IsFoundParticle ());
 
         // reduce children into found particles
-        for (auto& particles : m_vParticles)
-            thrust::transform_if (particles.begin (), particles.end (), thrust::discard_iterator<> (), computeAverageSum (_xyFactor), IsNotFoundParticle ());
+        for (auto& particles : sliceToParticles)
+            thrust::transform_if (particles.second.begin (), particles.second.end (), thrust::discard_iterator<> (), computeAverageSum (_xyFactor), IsNotFoundParticle ());
 
         // average positions
-        for (auto& particles : m_vParticles)
-            thrust::for_each (particles.begin (), particles.end (), averageParticlePositions (_xyFactor, _zFactor));
+        for (auto& particles : sliceToParticles)
+            thrust::for_each (particles.second.begin (), particles.second.end (), averageParticlePositions (_xyFactor, _zFactor));
 
         // remove children
         FilterParticlesBySliceCount filterParticlesBySliceCount{ _minSliceCount };
-        for (auto& particles : m_vParticles)
+        for (auto& particles : sliceToParticles)
         {
-            auto it = thrust::remove_if (particles.begin (), particles.end (), IsNotFoundParticle ());
-            particles.erase (it, particles.end ());
-            it = thrust::remove_if (particles.begin (), particles.end (), filterParticlesBySliceCount);
-            particles.erase (it, particles.end ());
+            auto it = thrust::remove_if (particles.second.begin (), particles.second.end (), IsNotFoundParticle ());
+            particles.second.erase (it, particles.second.end ());
+            it = thrust::remove_if (particles.second.begin (), particles.second.end (), filterParticlesBySliceCount);
+            particles.second.erase (it, particles.second.end ());
         }
 
         count = 0;
-        for (auto& particles : m_vParticles)
-            count += particles.size ();
+        for (auto& particles : sliceToParticles)
+            count += particles.second.size ();
 
         float boundary_r{ 0.100000001f };
         float minX{ std::numeric_limits<float>::max () };
@@ -222,45 +243,45 @@ std::map<int, std::vector<ParticleFinder::FoundParticle>> ParticleFinder::Solver
         float maxY{ std::numeric_limits<float>::min () };
         float maxZ{ std::numeric_limits<float>::min () };
 
-        for (auto& particles : m_vParticles)
+        for (auto& particles : sliceToParticles)
         {
-            auto it = thrust::remove_if (particles.begin (), particles.end (), IsNotFoundParticle ());
-            particles.erase (it, particles.end ());
+            auto it = thrust::remove_if (particles.second.begin (), particles.second.end (), IsNotFoundParticle ());
+            particles.second.erase (it, particles.second.end ());
 
-            auto X = thrust::minmax_element (particles.begin (), particles.end (), MinVectorElement<0> ());
+            auto X = thrust::minmax_element (particles.second.begin (), particles.second.end (), MinVectorElement<0> ());
             minX = std::min (minX, ((Particle)*X.first).x + boundary_r);
             maxX = std::max (maxX, ((Particle)*X.second).x - boundary_r);
 
-            auto Y = thrust::minmax_element (particles.begin (), particles.end (), MinVectorElement<1> ());
+            auto Y = thrust::minmax_element (particles.second.begin (), particles.second.end (), MinVectorElement<1> ());
             minY = std::min (minY, ((Particle)*Y.first).y + boundary_r);
             maxY = std::max (maxY, ((Particle)*Y.second).y - boundary_r);
 
-            auto Z = thrust::minmax_element (particles.begin (), particles.end (), MinVectorElement<2> ());
+            auto Z = thrust::minmax_element (particles.second.begin (), particles.second.end (), MinVectorElement<2> ());
             minZ = std::min (minZ, ((Particle)*Z.first).z + boundary_r);
             maxZ = std::max (maxZ, ((Particle)*Z.second).z - boundary_r);
         }
 
         CheckParticleBoundaries checkParticleBoundaries{ minX, minY, minZ, maxX, maxY, maxZ };
-        for (auto& particles : m_vParticles)
+        for (auto& particles : sliceToParticles)
         {
-            auto it = thrust::remove_if (particles.begin (), particles.end (), checkParticleBoundaries);
-            particles.erase (it, particles.end ());
+            auto it = thrust::remove_if (particles.second.begin (), particles.second.end (), checkParticleBoundaries);
+            particles.second.erase (it, particles.second.end ());
         }
 
         count = 0;
-        for (auto& particles : m_vParticles)
-            count += particles.size ();
+        for (auto& particles : sliceToParticles)
+            count += particles.second.size ();
 
         auto& hostParticleVec = ret[itParticles.first];
         hostParticleVec.resize (count);
         auto itHostCopy = hostParticleVec.begin ();
-        for (auto& particles : m_vParticles)
+        for (auto& particles : sliceToParticles)
         {
-            if (particles.empty ())
+            if (particles.second.empty ())
                 continue;
 
-            FoundParticleVec foundParticles (particles.size ());
-            thrust::transform (particles.begin (), particles.end (), foundParticles.begin (), Particle2FoundParticle ());
+            FoundParticleVec foundParticles (particles.second.size ());
+            thrust::transform (particles.second.begin (), particles.second.end (), foundParticles.begin (), Particle2FoundParticle ());
             itHostCopy = thrust::copy (foundParticles.begin (), foundParticles.end (), itHostCopy);
         }
 

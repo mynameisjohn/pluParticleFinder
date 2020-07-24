@@ -94,13 +94,15 @@ void ParticleFinder::getUserInput (GpuMat d_Input)
             _dilationRadius = mapParamValues[dilationRadiusTBName] / trackBarResolution;
             _particleThreshold = mapParamValues[particleThreshTBName] / trackBarResolution;
 
+            ResetKernels ();
+
             // TODO prevent bad values from existing
 
             GpuMat d_InputCirc = d_Input.clone ();
 
             // do DSP, get particles
             std::vector<FoundParticle> vParticlesInImg;
-            doDSPAndFindParticlesInImg (0, 0, d_Input, &vParticlesInImg, true);
+            doDSPAndFindParticlesInImg (0, 0, d_Input, &vParticlesInImg);
 
             // Draw circles in local max image
             if (!vParticlesInImg.empty ())
@@ -139,8 +141,8 @@ void ParticleFinder::getUserInput (GpuMat d_Input)
 
             // Copy all images to display image in correct place
             makeDisplayImage (d_Input).copyTo (displayMat (topLeft));
-            makeDisplayImage (_filteredImg).copyTo (displayMat (topRight));
-            makeDisplayImage (_dilatedImg).copyTo (displayMat (bottomLeft));
+            makeDisplayImage (_procData[0].filteredImg).copyTo (displayMat (topRight));
+            makeDisplayImage (_procData[0].dilatedImg).copyTo (displayMat (bottomLeft));
             makeDisplayImage (d_InputCirc).copyTo (displayMat (bottomRight));
 
             // Show new image

@@ -5,8 +5,13 @@
 #include <set>
 #include <fstream>
 
+#include <omp.h>
+
 bool ParticleFinder::Initialize(std::list<std::string> liStackPaths, int nStartOfStack, int nEndOfStack, bool bDoUserInput /*= false*/)
 {
+    int num_threads = omp_get_max_threads ();
+    _procData.resize (num_threads);
+
     // For each tiff stack
     int nSlices(0);
 #if DEBUG
@@ -50,17 +55,20 @@ bool ParticleFinder::Initialize(std::list<std::string> liStackPaths, int nStartO
                 if (_inputImages.empty())
                 {
                     // Initialize all other mats to zero on device (may be superfluous)
-                    _filteredImg = GpuMat(imgSize, CV_32F, 0.f);
-                    _dilatedImg = GpuMat(imgSize, CV_32F, 0.f);
-                    _scratchImg = GpuMat(imgSize, CV_32F, 0.f);
-                    _localMaxImg = GpuMat(imgSize, CV_32F, 0.f);
-                    _scratchImg = GpuMat(imgSize, CV_32F, 0.f);
+                    for (int t = 0; t < num_threads; t++)
+                    {
+                        _procData[t].filteredImg = GpuMat (imgSize, CV_32F, 0.f);
+                        _procData[t].dilatedImg = GpuMat (imgSize, CV_32F, 0.f);
+                        _procData[t].scratchImg = GpuMat (imgSize, CV_32F, 0.f);
+                        _procData[t].localMaxImg = GpuMat (imgSize, CV_32F, 0.f);
+                        _procData[t].scratchImg = GpuMat (imgSize, CV_32F, 0.f);
 
-                    // It's in our best interest to ensure these are continuous
-                    cv::cuda::createContinuous(imgSize, CV_32F, _threshImg);
-                    cv::cuda::createContinuous(imgSize, CV_8U, _particleImg);
-                    _threshImg.setTo(0);
-                    _particleImg.setTo(0);
+                        // It's in our best interest to ensure these are continuous
+                        cv::cuda::createContinuous (imgSize, CV_32F, _procData[t].threshImg);
+                        cv::cuda::createContinuous (imgSize, CV_8U, _procData[t].particleImg);
+                        _procData[t].threshImg.setTo (0);
+                        _procData[t].particleImg.setTo (0);
+                    }
                 }
 
                 // Convert FIBITMAP to 24 bit RGB, store inside cv::Mat's buffer
@@ -71,8 +79,8 @@ bool ParticleFinder::Initialize(std::list<std::string> liStackPaths, int nStartO
                 d_InputImg.upload(m);
 
                 // Convert to greyscale float, store in our input buffer
-                cv::cuda::cvtColor(d_InputImg, _scratchImg, cv::COLOR_RGB2GRAY);
-                _scratchImg.convertTo(d_InputImg, CV_32F, 1. / 0xFF);
+                cv::cuda::cvtColor(d_InputImg, _procData[0].scratchImg, cv::COLOR_RGB2GRAY);
+                _procData[0].scratchImg.convertTo(d_InputImg, CV_32F, 1. / 0xFF);
                 _inputImages.push_back(d_InputImg);
                 _imageToStackFrame[nSlices++] = std::make_pair (ixStack + 1, ixSlice);
                 // Inc slice count
@@ -106,7 +114,9 @@ bool ParticleFinder::Initialize(std::list<std::string> liStackPaths, int nStartO
             return false;
         }
 
-        _solver.Init (_inputImages.front ().rows);
+        ResetKernels ();
+
+        _solver.Init (_inputImages.front ().rows, omp_get_max_threads());
 
         if (bDoUserInput)
             getUserInput (_inputImages.front ());
@@ -115,6 +125,36 @@ bool ParticleFinder::Initialize(std::list<std::string> liStackPaths, int nStartO
     }
 
     return false;
+}
+
+void ParticleFinder::ResetKernels ()
+{
+#if DEBUG
+    std::cout << "Constructing DSP kernels" << std::endl;
+#endif
+
+    int nBPDiameter = 2 * _gaussFiltRadius + 1;
+    const cv::Size bpFilterSize (nBPDiameter, nBPDiameter);
+
+    int num_threads = omp_get_max_threads ();
+    for (int t = 0; t < num_threads; t++)
+    {
+        // Create circle image
+        cv::Mat h_Circle (bpFilterSize, CV_32F, 0.f); // cv::Mat::zeros (cv::Size (nBPDiameter, nBPDiameter), CV_32F);
+        cv::circle (h_Circle, cv::Point (_gaussFiltRadius, _gaussFiltRadius), _gaussFiltRadius, 1.f, -1);
+        _procData[t].circleFilter = cv::cuda::createLinearFilter (CV_32F, CV_32F, h_Circle);
+
+        // Create Gaussian Filter and normalization scale
+        const double dSigma = (double)(_HWHM / 0.8325546) / 2;
+        _procData[t].gaussFilter = cv::cuda::createGaussianFilter (CV_32F, CV_32F, bpFilterSize, dSigma);
+
+        // Create dilation mask
+        int nDilationDiameter = 2 * _dilationRadius + 1;
+        cv::Mat h_Dilation = cv::getStructuringElement (cv::MORPH_ELLIPSE, cv::Size (nDilationDiameter, nDilationDiameter));
+
+        // Create dilation kernel from host kernel (only single byte supported? why nVidia why)
+        _procData[t].dilationKernel = cv::cuda::createMorphologyFilter (cv::MORPH_DILATE, CV_32F, h_Dilation);
+    }
 }
 
 std::vector<ParticleFinder::FoundParticle>  ParticleFinder::launchTask (std::shared_ptr<AsyncParticleFindingTask> spParticleFindingTask)
@@ -137,7 +177,7 @@ std::vector<ParticleFinder::FoundParticle>  ParticleFinder::launchTask (std::sha
             GetSolver ()->SetMinSliceCount (m_spParticleFindingTask->nMinSliceCount);
             GetSolver ()->SetMaxSliceCount (m_spParticleFindingTask->nMaxSliceCount);
             GetSolver ()->SetNeighborRadius (m_spParticleFindingTask->nNeighborRadius);
-            GetSolver ()->Init (_inputImages.front ().rows);
+            GetSolver ()->Init (_inputImages.front ().rows, omp_get_max_threads ());
 
             // Make sure this is empty
             m_spParticleFindingTask->mapFoundSliceToParticles.clear ();
@@ -183,90 +223,69 @@ std::vector<ParticleFinder::FoundParticle>  ParticleFinder::launchTask (std::sha
     return{};
 }
 
-int ParticleFinder::doDSPAndFindParticlesInImg(int stackNum, int ixSlice, GpuMat d_Input, std::vector<FoundParticle> * pFoundParticles /*= nullptr*/, bool bResetKernels /*= false*/)
+int ParticleFinder::doDSPAndFindParticlesInImg(int stackNum, int ixSlice, GpuMat d_Input, std::vector<FoundParticle> * pFoundParticles /*= nullptr*/)
 {
-    if ( bResetKernels || _circleFilter.empty() || _dilationKernel.empty() )
+    int t = omp_get_thread_num ();
+
+#if DEBUG
+#pragma omp critical
     {
-#if DEBUG
-        std::cout << "Constructing DSP kernels" << std::endl;
-#endif
-
-        int nBPDiameter = 2 * _gaussFiltRadius + 1;
-        const cv::Size bpFilterSize (nBPDiameter, nBPDiameter);
-
-        // Create circle image
-        cv::Mat h_Circle (bpFilterSize, CV_32F, 0.f); // cv::Mat::zeros (cv::Size (nBPDiameter, nBPDiameter), CV_32F);
-        cv::circle( h_Circle, cv::Point ( _gaussFiltRadius, _gaussFiltRadius ), _gaussFiltRadius, 1.f, -1 );
-        _circleFilter = cv::cuda::createLinearFilter( CV_32F, CV_32F, h_Circle );
-
-        // Create Gaussian Filter and normalization scale
-        const double dSigma = (double)(_HWHM / 0.8325546) / 2;
-        _gaussFilter = cv::cuda::createGaussianFilter( CV_32F, CV_32F, bpFilterSize, dSigma );
-
-        // Create dilation mask
-        int nDilationDiameter = 2 * _dilationRadius + 1;
-        cv::Mat h_Dilation = cv::getStructuringElement( cv::MORPH_ELLIPSE, cv::Size( nDilationDiameter, nDilationDiameter ) );
-
-        // Create dilation kernel from host kernel (only single byte supported? why nVidia why)
-        _dilationKernel = cv::cuda::createMorphologyFilter( cv::MORPH_DILATE, CV_32F, h_Dilation );
+        std::cout << "Finding particles in slice " << ixSlice << " on thread " << t << std::endl;
     }
-
-#if DEBUG
-    std::cout << "Finding particles in slice " << ixSlice << std::endl;
 #endif
 
-    cv::cuda::normalize (d_Input, d_Input, 0, 100, cv::NORM_MINMAX, -1);
+    cv::cuda::normalize (d_Input, d_Input, 0, 100, cv::NORM_MINMAX, -1, cv::noArray (), _procData[t].stream);
     
     // Apply low/high pass filters (gaussian and circle kernels, resp.)
-    _gaussFilter->apply( d_Input, _filteredImg );
+    _procData[t].gaussFilter->apply( d_Input, _procData[t].filteredImg, _procData[t].stream );
     //ShowImage( m_dFilteredImg );
 
-    _circleFilter->apply( d_Input, _scratchImg );
+    _procData[t].circleFilter->apply( d_Input, _procData[t].scratchImg, _procData[t].stream );
     //ShowImage( m_dTmpImg );
     double dBandPassScale = 1 / (3 * pow (_gaussFiltRadius, 2));
-    _scratchImg.convertTo( _scratchImg, CV_32F, dBandPassScale);
+    _procData[t].scratchImg.convertTo( _procData[t].scratchImg, CV_32F, dBandPassScale, _procData[t].stream);
 
     // subtract tmp from bandpass to get filtered output
-    cv::cuda::subtract( _filteredImg, _scratchImg, _filteredImg );
+    cv::cuda::subtract (_procData[t].filteredImg, _procData[t].scratchImg, _procData[t].filteredImg, cv::noArray (), -1, _procData[t].stream);
     //ShowImage( m_dFilteredImg );
 
     // Any negative values become 0
-    cv::cuda::threshold( _filteredImg, _filteredImg, 0, 1, cv::THRESH_TOZERO );
+    cv::cuda::threshold( _procData[t].filteredImg, _procData[t].filteredImg, 0, 1, cv::THRESH_TOZERO, _procData[t].stream );
     //ShowImage( m_dFilteredImg );
 
     // Remap this from 0 to 100, so we have a normalized
     // range of particle intenstiy thresholds
-    cv::cuda::normalize (_filteredImg, _filteredImg, 0, 100, cv::NORM_MINMAX, -1);
+    cv::cuda::normalize (_procData[t].filteredImg, _procData[t].filteredImg, 0, 100, cv::NORM_MINMAX, -1, cv::noArray (), _procData[t].stream);
 
     // Reset thresh to base value
-    _threshImg.setTo( cv::Scalar( _particleThreshold ) );
+    _procData[t].threshImg.setTo( cv::Scalar( _particleThreshold ), _procData[t].stream );
 
     // Store max of (m_fParticleThreshold, m_dFilteredImg) in m_dThreshImg
-    cv::cuda::max( _threshImg, _filteredImg, _threshImg );
+    cv::cuda::max( _procData[t].threshImg, _procData[t].filteredImg, _procData[t].threshImg, _procData[t].stream );
     //ShowImage( m_dThreshImg );
 
     // Initialize dilated image to threshold value
-    _dilatedImg.setTo( cv::Scalar( _particleThreshold ) );
+    _procData[t].dilatedImg.setTo( cv::Scalar( _particleThreshold ), _procData[t].stream );
 
     // Apply dilation
-    _dilationKernel->apply( _threshImg, _dilatedImg );
+    _procData[t].dilationKernel->apply( _procData[t].threshImg, _procData[t].dilatedImg, _procData[t].stream );
     //( m_dDilatedImg );
 
     // Subtract filtered image from dilated (negates pixels that are not local maxima)
-    cv::cuda::subtract( _filteredImg, _dilatedImg, _localMaxImg );
+    cv::cuda::subtract (_procData[t].filteredImg, _procData[t].dilatedImg, _procData[t].localMaxImg, cv::noArray (), -1, _procData[t].stream);
 
     // Exponentiate m_dLocalMaxImg (sends negative values to low numbers, lm to 0)
-    cv::cuda::exp( _localMaxImg, _localMaxImg );
+    cv::cuda::exp( _procData[t].localMaxImg, _procData[t].localMaxImg, _procData[t].stream );
 
     // Threshold exponentiated image - we are left with only local maxima as nonzero pixels
     //ShowImage( m_dLocalMaxImg );
     constexpr double epsilon (0.0000001);
-    cv::cuda::threshold( _localMaxImg, _localMaxImg, 1.0 - epsilon, 1, cv::THRESH_BINARY );
+    cv::cuda::threshold( _procData[t].localMaxImg, _procData[t].localMaxImg, 1.0 - epsilon, 1, cv::THRESH_BINARY, _procData[t].stream );
     
     // Cast to uchar, store as particle image (values are still 0 or 1, so no scale needed)
-    _localMaxImg.convertTo( _particleImg, CV_8U );
+    _procData[t].localMaxImg.convertTo( _procData[t].particleImg, CV_8U, _procData[t].stream );
 
-    return _solver.FindParticlesInImage(stackNum, ixSlice, d_Input, _filteredImg, _threshImg, _particleImg, pFoundParticles );
+    return _solver.FindParticlesInImage( t, stackNum, ixSlice, d_Input, _procData[t].filteredImg, _procData[t].threshImg, _procData[t].particleImg, pFoundParticles );
 }
 
 // Returns empty if being launched asynchronously
@@ -293,7 +312,7 @@ std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute (bool linkPar
     {
         std::vector<FoundParticle> particlesInImg, * pParticlesInImg{ nullptr };
         std::ofstream outputFile;
-        if (!_outputFile2D.empty())
+        if (!_outputFile2D.empty ())
         {
             outputFile.open (_outputFile2D, std::ios::out);
             outputFile.setf (std::ios::fixed);
@@ -302,12 +321,12 @@ std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute (bool linkPar
         }
 
         // Otherwise we do the DSP with our current params and return found particles
-        for (size_t i = 0; i < _inputImages.size (); i++)
+#pragma omp parallel for
+        for (int i = 0; i < (int)_inputImages.size (); i++)
         {
-            int width = _inputImages[0].cols;
-            doDSPAndFindParticlesInImg (_imageToStackFrame[i].first , (int)i, _inputImages[i], pParticlesInImg);
+            doDSPAndFindParticlesInImg (_imageToStackFrame[i].first, i, _inputImages[i], pParticlesInImg);
 
-            if (outputFile.is_open())
+            if (outputFile.is_open ())
             {
                 for (int p = 0; p < particlesInImg.size (); p++)
                 {

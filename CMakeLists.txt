@@ -6,7 +6,11 @@ PROJECT(pluParticleFinder)
 # min cmake version
 CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
 
-SET(CMAKE_CXX_FLAGS "-std=c++11")
+IF(WIN32)
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /openmp")
+ELSE(WIN32)
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
+ENDIF(WIN32)
 
 # default to debug
 SET(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Debug or Release")
@@ -22,10 +26,10 @@ IF (CMAKE_BUILD_TYPE MATCHES Debug)
 ELSEIF (CMAKE_BUILD_TYPE MATCHES Release)
   # Add unix optimization flag
   IF(UNIX)
-    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -O2")
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
   ENDIF(UNIX)
   # I think this flag is cross platform
-  SET(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS}; -Xptxas -O3")
+  SET(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS}; -Xptxas -O3;--default-stream per-thread")
 ENDIF (CMAKE_BUILD_TYPE MATCHES Debug)
 
 SET(SOLVER_DEVICE 1 CACHE BOOL "Run the particle solver on the device")

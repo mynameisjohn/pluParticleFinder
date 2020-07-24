@@ -7,9 +7,9 @@ ParticleFinder::Solver::Solver():
 
 ParticleFinder::Solver::~Solver () {}
 
-void ParticleFinder::Solver::Init (int N)
+void ParticleFinder::Solver::Init (int N, int numThreads)
 {
-    return _solverImpl->Init (N);
+    return _solverImpl->Init (N, numThreads);
 }
 
 void ParticleFinder::Solver::ResetLinking ()
@@ -17,7 +17,9 @@ void ParticleFinder::Solver::ResetLinking ()
     _solverImpl->_stackToParticles.clear ();
 }
 
-int ParticleFinder::Solver::FindParticlesInImage(int stackNum, 
+int ParticleFinder::Solver::FindParticlesInImage(
+                                 int threadNum,
+                                 int stackNum,
                                  int sliceIdx,
                                  GpuMat input, 
                                  GpuMat filteredImage, 
@@ -25,7 +27,7 @@ int ParticleFinder::Solver::FindParticlesInImage(int stackNum,
                                  GpuMat particleImg,
                                  std::vector<FoundParticle> * particlesInImg /*= nullptr*/ )
 {
-    return _solverImpl->FindParticlesInImage( stackNum, sliceIdx, input, filteredImage, threshImg, particleImg, particlesInImg);
+    return _solverImpl->FindParticlesInImage( threadNum, stackNum, sliceIdx, input, filteredImage, threshImg, particleImg, particlesInImg);
 }
 
 std::map<int, std::vector<ParticleFinder::FoundParticle>> ParticleFinder::Solver::LinkFoundParticles ()

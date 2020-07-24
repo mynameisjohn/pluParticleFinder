@@ -44,14 +44,15 @@ public:
 
         // Initializes kernels and internal data structures
         // (after params have been set)
-        void Init (int N);
+        void Init (int N, int numThreads);
 
         // Resets the linking state
         void ResetLinking();
         
         // Find 2D particles in a given image, return the count of particles found
         // (optionally assign particlesInImg to get all particles in this image)
-        int FindParticlesInImage(int stackNum, 
+        int FindParticlesInImage(int threadNum,
+                                 int stackNum, 
                                  int sliceIdx,
                                  GpuMat input, 
                                  GpuMat filteredImage, 
@@ -92,16 +93,20 @@ public:
 
     // Internal buffers - these are of the same
     // dimensions, but may be different data types
-    GpuMat _filteredImg;    // Post Gaussian Bandpass
-    GpuMat _dilatedImg;    // Post dilation
-    GpuMat _localMaxImg;    // Local Max image
-    GpuMat _particleImg;    // Particle Image
-    GpuMat _threshImg;    // Thresholded Particle image
-    GpuMat _scratchImg;        // Scrach buffer image
-
-    cv::Ptr<cv::cuda::Filter> _gaussFilter;        // Gaussian Filter
-    cv::Ptr<cv::cuda::Filter> _circleFilter;        // Circle Filter
-    cv::Ptr<cv::cuda::Filter> _dilationKernel;    // Dilation Filter
+    struct procData
+    {
+        GpuMat filteredImg;    // Post Gaussian Bandpass
+        GpuMat dilatedImg;    // Post dilation
+        GpuMat localMaxImg;    // Local Max image
+        GpuMat particleImg;    // Particle Image
+        GpuMat threshImg;    // Thresholded Particle image
+        GpuMat scratchImg;        // Scrach buffer image
+        cv::Ptr<cv::cuda::Filter> gaussFilter;        // Gaussian Filter
+        cv::Ptr<cv::cuda::Filter> circleFilter;        // Circle Filter
+        cv::Ptr<cv::cuda::Filter> dilationKernel;    // Dilation Filter
+        cv::cuda::Stream stream;
+    };
+    std::vector<procData> _procData;
 
     ///////////////////////////////////////////////////////////////////
     // DSP parameters
@@ -114,7 +119,7 @@ public:
     // This actual detects particles in the input image
     // the result is a contiguous black and white
     // image that can be used in particle detection
-    int doDSPAndFindParticlesInImg( int stackNum, int ixSlice, GpuMat d_Input, std::vector<FoundParticle> * pFoundParticles = nullptr, bool bResetKernels = false );
+    int doDSPAndFindParticlesInImg( int stackNum, int ixSlice, GpuMat d_Input, std::vector<FoundParticle> * pFoundParticles = nullptr );
 
     void getUserInput( GpuMat d_Input );
     
@@ -144,6 +149,7 @@ public:
     void SetOutputFileXYZT (std::string outputFileXYZT) { _outputFileXYZT = outputFileXYZT; }
 
     bool Initialize(std::list<std::string> liStackPaths, int nStartOfStack, int nEndOfStack, bool bDoUserInput = false);
+    void ResetKernels ();
 
     size_t GetNumImages () const { return _inputImages.size (); }
     cv::Size GetImageDimensions () { return _inputImages.empty () ? cv::Size() : _inputImages.front ().size (); }
