@@ -28,9 +28,6 @@ struct Particle
     int nContributingSlices{ 0 };        // # of slices contributing
 };
 
-// Solver implementation
-struct ParticleFinder::Solver::impl
-{
     // Useful typedefs of mine
 #if SOLVER_DEVICE
     using UcharVec = thrust::device_vector < unsigned char >;
@@ -56,6 +53,10 @@ struct ParticleFinder::Solver::impl
     using FoundParticleVec = thrust::host_vector <ParticleFinder::FoundParticle>;
     using Img = cv::Mat;
 #endif
+
+// Solver implementation
+struct ParticleFinder::Solver::impl
+{
 
     // sets default parameters
     impl ();
