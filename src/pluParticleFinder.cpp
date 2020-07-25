@@ -345,16 +345,22 @@ std::vector<ParticleFinder::FoundParticle> ParticleFinder::Execute (bool linkPar
 #if DEBUG
             std::cout << "Linking particles" << std::endl;
 #endif
-
-            std::ofstream particlePosFile (_outputFileXYZT, std::ios::out);
-            for (auto& it : _solver.LinkFoundParticles ())
+            if (_outputFileXYZT.empty ())
             {
-                for (auto& particle : it.second)
+                _solver.LinkFoundParticles ();
+            }
+            else
+            {
+                std::ofstream particlePosFile (_outputFileXYZT, std::ios::out);
+                for (auto& it : _solver.LinkFoundParticles ())
                 {
-                    particlePosFile << it.first << '\t';
-                    particlePosFile << particle.fPosX << '\t';
-                    particlePosFile << particle.fPosY << '\t';
-                    particlePosFile << particle.fPosZ << std::endl;
+                    for (auto& particle : it.second)
+                    {
+                        particlePosFile << it.first << '\t';
+                        particlePosFile << particle.fPosX << '\t';
+                        particlePosFile << particle.fPosY << '\t';
+                        particlePosFile << particle.fPosZ << std::endl;
+                    }
                 }
             }
         }

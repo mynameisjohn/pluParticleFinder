@@ -48,7 +48,8 @@ int main( int argc, char ** argv )
         if (linkParticles)
         {
             auto linkParams = params.child ("link_params");
-            P.SetOutputFileXYZT (linkParams.attribute ("outputfile_XYZT").as_string ());
+            if (linkParams.attribute ("outputfile_XYZT").as_string ())
+                P.SetOutputFileXYZT (linkParams.attribute ("outputfile_XYZT").as_string ());
             P.GetSolver ()->SetFeatureRadius (linkParams.attribute ("feature_radius").as_int ());
             P.GetSolver ()->SetMaskRadius (linkParams.attribute ("mask_radius").as_int ());
             P.GetSolver ()->SetNeighborRadius (linkParams.attribute ("neighbor_radius").as_int ());
