@@ -57,7 +57,6 @@ struct Particle
 // Solver implementation
 struct ParticleFinder::Solver::impl
 {
-
     // sets default parameters
     impl ();
 
@@ -91,4 +90,7 @@ struct ParticleFinder::Solver::impl
 
     // used to map slices to found particles
     std::vector<std::map<int, std::map<int, ParticleVec>>> _stackToParticles;
+
+    // used for 
+    const static int MASK_RAD_MAX = 7;
 };

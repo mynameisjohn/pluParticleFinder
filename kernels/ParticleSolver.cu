@@ -25,6 +25,8 @@ ParticleFinder::Solver::impl::impl () :
 
 void ParticleFinder::Solver::impl::Init (int N, int threadCount)
 {
+    assert (_maskRadius <= MASK_RAD_MAX);
+
     // Neighbor region diameter
     int diameter = 2 * _maskRadius + 1;
     cv::Size maskSize (diameter, diameter);
@@ -82,6 +84,28 @@ void ParticleFinder::Solver::impl::Init (int N, int threadCount)
     }
 }
 
+template<int maskRadius, std::enable_if<maskRadius == 0>::type* = nullptr>
+void makeParticleFromIdxWithMaskRadius (IntVec& newIndicesVec, ParticleVec& newParticlesVec, size_t newParticleCount,
+    int stackNum, int sliceIdx, int N, int mR, float* lm, float* cK, float* xK, float* yK, float* sqK)
+{
+    assert (false);
+}
+
+template<int maskRadius, std::enable_if<maskRadius != 0>::type* = nullptr>
+void makeParticleFromIdxWithMaskRadius (IntVec& newIndicesVec, ParticleVec& newParticlesVec, size_t newParticleCount, 
+    int stackNum, int sliceIdx, int N, int mR, float* lm, float* cK, float* xK, float* yK, float* sqK)
+{
+    if (maskRadius == mR)
+    {
+        thrust::transform (newIndicesVec.begin (), newIndicesVec.begin () + newParticleCount, newParticlesVec.begin (),
+            MakeParticleFromIdx<maskRadius> (stackNum, sliceIdx, N, lm, cK, xK, yK, sqK));
+        return;
+    }
+
+    makeParticleFromIdxWithMaskRadius<maskRadius - 1> (newIndicesVec, newParticlesVec, newParticleCount,
+        stackNum, sliceIdx, N, mR, lm, cK, xK, yK, sqK);
+}
+
 int ParticleFinder::Solver::impl::FindParticlesInImage (int threadNum, int stackNum, int sliceIdx, GpuMat d_Input, GpuMat d_FilteredImage, GpuMat d_ThreshImg, GpuMat d_ParticleImg, std::vector<FoundParticle>* pParticlesInImg)
 {
     // Make sure we've initialized something
@@ -121,13 +145,15 @@ int ParticleFinder::Solver::impl::FindParticlesInImage (int threadNum, int stack
 
     // Now transform each index into a particle by looking at the source image data surrounding the particle
     ParticleVec newParticlesVec (newParticleCount);
+    makeParticleFromIdxWithMaskRadius<MASK_RAD_MAX> (newIndicesVec, newParticlesVec, newParticleCount,
+        stackNum, sliceIdx, N, _maskRadius, d_pThreshImgBuf.get (), _circleKernelPtr.get (), _radXKernelPtr.get (), _radYKernelPtr.get (), _radSqKernelPtr.get ());
 
-    thrust::transform (newIndicesVec.begin (), newIndicesVec.begin () + newParticleCount, newParticlesVec.begin (),
-#if SOLVER_DEVICE
-        MakeParticleFromIdx (stackNum, sliceIdx, N, _maskRadius, d_pThreshImgBuf.get (), _circleKernelPtr.get (), _radXKernelPtr.get (), _radYKernelPtr.get (), _radSqKernelPtr.get ()));
-#else
-        MakeParticleFromIdx (stackNum, sliceIdx, N, m_uMaskRadius, d_pThreshImgBuf, _circleKernelPtr, _radXKernelPtr, _radYKernelPtr, _radSqKernelPtr));
-#endif
+//    thrust::transform (newIndicesVec.begin (), newIndicesVec.begin () + newParticleCount, newParticlesVec.begin (),
+//#if SOLVER_DEVICE
+//        MakeParticleFromIdx (stackNum, sliceIdx, N, d_pThreshImgBuf.get (), _circleKernelPtr.get (), _radXKernelPtr.get (), _radYKernelPtr.get (), _radSqKernelPtr.get ()));
+//#else
+//        MakeParticleFromIdx (stackNum, sliceIdx, N, d_pThreshImgBuf, _circleKernelPtr, _radXKernelPtr, _radYKernelPtr, _radSqKernelPtr));
+//#endif
 
     // Store new particles if requested
     if (pParticlesInImg)

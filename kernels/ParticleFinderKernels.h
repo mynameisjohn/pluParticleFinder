@@ -162,22 +162,23 @@ struct IsParticleAtIdx
         return (val != 0) && (x > featureRad) && (y > featureRad) && (x + featureRad < N) && (y + featureRad < N);
     }
 };// Turn an index at which we've detected a particle (above) into a real particle
+template <const int R, const int D = (2 * R + 1), const int K = D * D>
 struct MakeParticleFromIdx
 {
+    static_assert(K == ((2 * R + 1) * (2 * R + 1)), "K is the # of pixels in the kernel with radius R");
+
     int stackNum;      // Current stack number
     int sliceIdx;      // Current slice index
-    int kernelRad;     // Kernel (mask) radius
     int N;             // Image dimension
     float* lmImg;      // pointer to image in which particle was detected
     float* circMask;   // pointer to circle mask
     float* rxMask;     // pointer to x offset mask
     float* ryMask;     // pointer to y offset mask
     float* rSqMask;    // pointer to r2 mask 
-    MakeParticleFromIdx (int nStack, int sIdx, int n, int kRad, float* lm, float* cK, float* xK, float* yK, float* sqK) :
+    MakeParticleFromIdx (int nStack, int sIdx, int n, float* lm, float* cK, float* xK, float* yK, float* sqK) :
         stackNum (nStack),
         sliceIdx (sIdx),
         N (n),
-        kernelRad (kRad),
         lmImg (lm),
         circMask (cK),
         rxMask (xK),
@@ -203,12 +204,44 @@ struct MakeParticleFromIdx
         float x_offset (0), y_offset (0);
         float r2_sum (0);
 
-        // Apply the mask as a multiplcation
-        for (int iY = -kernelRad; iY <= kernelRad; iY++)
+        // R = 1
+        // D = 3
+        // K = 9
+        // iY = 0, iX = 0
+        // iY = 0, iX = 1
+        // iY = 0, iX = 2
+        // iY = 1, iX = 0
+        // iY = 1, iX = 1
+        // iY = 1, iX = 2
+        // iY = 2, iX = 0
+        // iY = 2, iX = 1
+        // iY = 2, iX = 2
+#pragma unroll
+        for (int k = 0; k < K; k++)
+        {
+            int i = k / D;
+            int j = k % D;
+
+            int iY = i - R;
+            int iX = j - R;
+
+            float* ptrY = &lmImg[idx + (N * iY)];
+            float lmImgVal = ptrY[iX];
+
+            // Multiply by mask value, sum, advance mask pointer
+            total_mass += lmImgVal * (*tmpCircPtr++);
+            x_offset += lmImgVal * (*tmpXPtr++);
+            y_offset += lmImgVal * (*tmpYPtr++);
+            r2_sum += lmImgVal * (*tmpR2Ptr++);
+        }
+
+        /*
+        for (int iY = -R; iY <= R; iY++)
         {
             // For y, go down then up
             float* ptrY = &lmImg[idx + (N * iY)];
-            for (int iX = -kernelRad; iX <= kernelRad; iX++)
+
+            for (int iX = -R; iX <= R; iX++)
             {
                 // Get the local max img value
                 float lmImgVal = ptrY[iX];
@@ -220,13 +253,14 @@ struct MakeParticleFromIdx
                 r2_sum += lmImgVal * (*tmpR2Ptr++);
             }
         }
+        */
 
         // Calculate x val, y val
         // (in the original code the calculation is
         // x_val = x + x_offset/total_maxx - kernelRad - 1... not sure if I still need that)
         float total_mass_inv = 1.f / total_mass;
-        float x_val = float (x) + x_offset * total_mass_inv - kernelRad - 1;
-        float y_val = float (y) + y_offset * total_mass_inv - kernelRad - 1;
+        float x_val = float (x) + x_offset * total_mass_inv - R - 1;
+        float y_val = float (y) + y_offset * total_mass_inv - R - 1;
         float z_val = float (sliceIdx + 1);
         float r2_val = r2_sum * total_mass_inv;
 
