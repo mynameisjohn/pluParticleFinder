@@ -116,7 +116,6 @@ int ParticleFinder::Solver::impl::FindParticlesInImage (int threadNum, int stack
 #if SOLVER_DEVICE
     UcharPtr d_pParticleImgBufStart ((unsigned char*)d_ParticleImg.datastart);
     UcharPtr d_pParticleImgBufEnd ((unsigned char*)d_ParticleImg.dataend);
-    UcharVec d_ParticleImgVec (d_pParticleImgBufStart, d_pParticleImgBufEnd);
     Floatptr d_pThreshImgBuf ((float*)d_ThreshImg.data);
 #else
     // For host debugging
@@ -133,8 +132,8 @@ int ParticleFinder::Solver::impl::FindParticlesInImage (int threadNum, int stack
 
     // For each pixel in the particle image, we care if it's nonzero and if it's far enough from the edges
     // So we need its index (transformable into twoD pos) and its value, which we zip
-    auto itDetectParticleBegin = thrust::make_zip_iterator (thrust::make_tuple (d_ParticleImgVec.begin (), thrust::counting_iterator<int> (0)));
-    auto itDetectParticleEnd = thrust::make_zip_iterator (thrust::make_tuple (d_ParticleImgVec.end (), thrust::counting_iterator<int> (N * N)));
+    auto itDetectParticleBegin = thrust::make_zip_iterator (thrust::make_tuple (d_pParticleImgBufStart, thrust::counting_iterator<int> (0)));
+    auto itDetectParticleEnd = thrust::make_zip_iterator (thrust::make_tuple (d_pParticleImgBufEnd, thrust::counting_iterator<int> (N * N)));
 
     auto& newIndicesVec = _newIndicesVec[threadNum];
 
