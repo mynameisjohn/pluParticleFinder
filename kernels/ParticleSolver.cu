@@ -268,9 +268,6 @@ std::map<int, std::vector<ParticleFinder::FoundParticle>> ParticleFinder::Solver
 
         for (auto& particles : sliceToParticles)
         {
-            auto it = thrust::remove_if (particles.second.begin (), particles.second.end (), IsNotFoundParticle ());
-            particles.second.erase (it, particles.second.end ());
-
             auto X = thrust::minmax_element (particles.second.begin (), particles.second.end (), MinVectorElement<0> ());
             minX = std::min (minX, ((Particle)*X.first).x + boundary_r);
             maxX = std::max (maxX, ((Particle)*X.second).x - boundary_r);
