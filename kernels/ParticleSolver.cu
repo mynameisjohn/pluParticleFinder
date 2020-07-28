@@ -248,12 +248,10 @@ std::map<int, std::vector<ParticleFinder::FoundParticle>> ParticleFinder::Solver
             thrust::for_each (particles.second.begin (), particles.second.end (), averageParticlePositions (_xyFactor, _zFactor));
 
         // remove children
-        FilterParticlesBySliceCount filterParticlesBySliceCount{ _minSliceCount };
+        FilterFoundParticlesBySliceCount filterFoundParticlesBySliceCount{ _minSliceCount };
         for (auto& particles : sliceToParticles)
         {
-            auto it = thrust::remove_if (particles.second.begin (), particles.second.end (), IsNotFoundParticle ());
-            particles.second.erase (it, particles.second.end ());
-            it = thrust::remove_if (particles.second.begin (), particles.second.end (), filterParticlesBySliceCount);
+            auto it = thrust::remove_if (particles.second.begin (), particles.second.end (), filterFoundParticlesBySliceCount);
             particles.second.erase (it, particles.second.end ());
         }
 

@@ -107,12 +107,12 @@ struct CheckParticleBoundaries
             (p.z < _minZ) || (p.z > _maxZ);
     }
 };
-struct FilterParticlesBySliceCount
+struct FilterFoundParticlesBySliceCount
 {
     int _minSlices;
     thrust_operator bool operator()(const Particle P)
     {
-        return P.nContributingSlices < _minSlices;
+        return P.parent != nullptr || P.nContributingSlices < _minSlices;
     }
 };
 template<const int N>
