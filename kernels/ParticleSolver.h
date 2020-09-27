@@ -72,7 +72,7 @@ struct ParticleFinder::Solver::impl
     // Particle Linking params
     int _minSliceCount;                // The minimum # of slices we require to contribute to a particle
     int _maxSliceCount;                // The maximum # of slices we allow to contribute to a particle
-    int _neighborRadius;               // The radius in which we search for new particles
+    float _neighborRadius;             // The radius in which we search for new particles
     float _xyFactor;
     float _zFactor;
 

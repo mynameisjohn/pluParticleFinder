@@ -137,8 +137,8 @@ public:
     // The other way is to use these setters
     inline void SetGaussianRadius (int nGaussianRadius) { _gaussFiltRadius = nGaussianRadius; }
     inline void SetDilationRadius (int nDilationRadius) { _dilationRadius = nDilationRadius; }
-    inline void SetFWHM (int fHWHM) { _HWHM = fHWHM; }
-    inline void SetParticleThreshold (int fParticleThreshold) { _particleThreshold = fParticleThreshold; }
+    inline void SetFWHM (float fHWHM) { _HWHM = fHWHM; }
+    inline void SetParticleThreshold (float fParticleThreshold) { _particleThreshold = fParticleThreshold; }
 
     inline int GetGaussianRadius () const { return _gaussFiltRadius; }
     inline int GetDilationRadius () const { return _gaussFiltRadius; }
