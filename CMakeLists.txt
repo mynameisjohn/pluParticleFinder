@@ -32,9 +32,11 @@ ELSEIF (CMAKE_BUILD_TYPE MATCHES Release)
   SET(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS}; -Xptxas -O3;--default-stream per-thread")
 ENDIF (CMAKE_BUILD_TYPE MATCHES Debug)
 
+# Default SOLVER_DEVICE on
 SET(SOLVER_DEVICE 1 CACHE BOOL "Run the particle solver on the device")
 ADD_DEFINITIONS(-DSOLVER_DEVICE=${SOLVER_DEVICE})
 
+# CUDA sm_arch
 SET(CUDA_ARCH "sm_50" CACHE STRING "CUDA Streaming Architecture version")
 
 # Hard code CUDA to be on for now
@@ -46,6 +48,7 @@ SET(CUDA_ARCH "sm_50" CACHE STRING "CUDA Streaming Architecture version")
 # Set up sm arch (may want to change this)
 SET(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS};-arch ${CUDA_ARCH}")
 
+# OpenCV setup (this might need some work)
 SET(OCV_VERSION "412" CACHE STRING "OpenCV Version")
 
 IF (CMAKE_BUILD_TYPE MATCHES Debug)
