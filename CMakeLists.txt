@@ -1,5 +1,5 @@
 # Possible cmake invocation:
-# cmake .. -DSOLVER_DEVICE=1 -DOCV_VERSION=412 -DOCV_INC_DIR=E:\Libraries\OpenCV\412\include -DOCV_LIB_DIR=E:\Libraries\OpenCV\412\lib\x64 -DCMAKE_BUILD_TYPE=Debug
+# cmake .. -DOCV_VERSION=412 -DOCV_INC_DIR=E:\Libraries\OpenCV\412\include -DOCV_LIB_DIR=E:\Libraries\OpenCV\412\lib\x64
 
 PROJECT(pluParticleFinder)
 
